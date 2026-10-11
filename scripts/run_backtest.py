@@ -116,6 +116,8 @@ def main() -> None:
                     help="large: 대형주, all: 대형주 + 중형주, small: 소형주, every: 전부, sp1500: S&P 1500")
     ap.add_argument("--set", default="legends", choices=sorted(SETS),
                     help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교, earnings_wide: 오닐·미너비니 + 실적(넓은 종목용), pead: 실적 서프라이즈 후 추세, reversion: 단기 과매도 반등")
+    ap.add_argument("--low-cost-bps", type=float, default=None,
+                    help="이 비용(편도 bp)으로도 다시 계산해 표를 덧붙임 (예: 키움 이벤트 수수료 7)")
     ap.add_argument("--out", default="reports")
     args = ap.parse_args()
 
@@ -180,6 +182,37 @@ def main() -> None:
         tr = r.trades[pd.to_datetime(r.trades["entry_date"]) >= split] if len(r.trades) else r.trades
         dbl[label] = stats(r.returns[m], tr, r.exposure[m])
 
+    # Optional: the same strategies at a lower cost (e.g. a discounted commission, limit orders).
+    low_lines = []
+    if args.low_cost_bps is not None:
+        low_runs = {label: engine.run(strat, cost_bps=args.low_cost_bps, start=args.start)
+                    for label, (strat, _) in results.items()}
+
+        def low_period(mask_fn) -> dict[str, dict]:
+            rows = {}
+            for label, r in low_runs.items():
+                tr = r.trades
+                tm = mask_fn(pd.to_datetime(tr["entry_date"])) if len(tr) else []
+                rows[label] = stats(r.returns[mask_fn(r.returns.index)], tr[tm] if len(tr) else tr,
+                                    r.exposure[mask_fn(r.exposure.index)])
+            rows["(비교) S&P500 그냥 보유"] = stats(spy_ret[mask_fn(spy_ret.index)])
+            return rows
+
+        low_lines = [
+            f"## 거래비용 {args.low_cost_bps:g}bp일 때 (키움 이벤트 수수료 0.07% 수준)",
+            "",
+            "달러를 들고 지정가로 거래하면 환전 비용과 미끄러짐이 거의 없어 비용이 이 정도까지 내려갑니다.",
+            "",
+            "검증 구간:",
+            "",
+            table(low_period(lambda ix: ix >= split)),
+            "",
+            "학습 구간:",
+            "",
+            table(low_period(lambda ix: (ix >= pd.Timestamp(args.start)) & (ix < split))),
+            "",
+        ]
+
     mom = engine.run(MomentumSwing().prepare(data, market=MARKET), cost_bps=args.cost_bps,
                      start=args.start).returns
     corr = correlations({k: v[1].returns for k, v in results.items()},
@@ -231,6 +264,7 @@ def main() -> None:
         "",
         table(dbl),
         "",
+        *low_lines,
         "## 다른 전략과 같이 움직이는 정도 (검증 구간 월수익률 상관계수)",
         "",
         "1에 가까우면 같이 오르고 같이 내립니다. 기존 앱과 함께 돌린다면 낮을수록 위험이 분산됩니다. "

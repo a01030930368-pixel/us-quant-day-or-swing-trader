@@ -59,7 +59,7 @@ jobs:
       - name: 단기 과매도 반등 (S&P 1500)
         run: >
           python scripts/run_backtest.py --set reversion --universe sp1500 --start ${{ inputs.start || '2010-01-01' }}
-          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }} --low-cost-bps 7
       - run: >
           cat reports/swing_report_reversion_sp1500.md reports/swing_report_pead_sp1500.md reports/swing_report_large.md reports/swing_report_all.md
           reports/swing_report_legends2_all.md reports/swing_report_refine_all.md
