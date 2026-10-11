@@ -19,14 +19,17 @@ from swing.data import load_ohlc  # noqa: E402
 from swing.legends import LEGENDS  # noqa: E402
 from swing.legends2 import LEGENDS2  # noqa: E402
 from swing.refine import REFINED  # noqa: E402
+from swing.earnings_legends import EARNINGS, EPS_MIN, SALES_MIN  # noqa: E402
+from swing.fundamentals import growth_flags, load_facts  # noqa: E402
 from swing.strategies import ALL, MomentumSwing  # noqa: E402
 
 TITLES = {"legends": "전설 1그룹 규칙", "legends2": "전설 2그룹 규칙", "round2": "후보 전략",
-          "refine": "와인스타인·다바스 다듬기", "legends_all": "전설 1·2그룹 규칙"}
+          "refine": "와인스타인·다바스 다듬기", "legends_all": "전설 1·2그룹 규칙",
+          "earnings": "전설 규칙 + 실적 조건"}
 SETS = {"legends": LEGENDS, "legends2": LEGENDS2, "round2": ALL, "refine": REFINED,
-        "legends_all": LEGENDS + LEGENDS2}
+        "legends_all": LEGENDS + LEGENDS2, "earnings": EARNINGS}
 RULE_CHAPTERS = {"legends": "12장", "legends2": "14장", "refine": "12·14장",
-                 "legends_all": "12·14장"}
+                 "legends_all": "12·14장", "earnings": "12·14·17장"}
 from swing.universe import MARKET, UNIVERSE_LABELS, UNIVERSES  # noqa: E402
 
 
@@ -108,7 +111,7 @@ def main() -> None:
     ap.add_argument("--universe", default="large", choices=sorted(UNIVERSES),
                     help="large: 대형주, all: 대형주 + 중형주, small: 소형주, every: 전부")
     ap.add_argument("--set", default="legends", choices=sorted(SETS),
-                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부")
+                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교")
     ap.add_argument("--out", default="reports")
     args = ap.parse_args()
 
@@ -117,6 +120,19 @@ def main() -> None:
     split = pd.Timestamp(args.split)
     universe = [t for t in data["Close"].columns if t != MARKET]
 
+    earn_lines = []
+    if args.set == "earnings":
+        flags, cover = growth_flags(load_facts(universe), data["Close"].index, EPS_MIN, SALES_MIN)
+        if cover["eps"] == 0:
+            raise RuntimeError("SEC 실적 데이터를 하나도 받지 못했습니다. 접속이 막혔는지 확인하세요.")
+        data["EarnOK"] = flags
+        since = flags.index >= pd.Timestamp(args.start)
+        earn_lines = [
+            f"- 실적 데이터: 미국 증권거래위원회(SEC) 공시. {len(universe)}개 중 EPS는 {cover['eps']}개, "
+            f"매출은 {cover['sales']}개 종목에서 받았습니다(은행 등 매출 항목이 다른 회사는 빠짐). "
+            "공시한 다음 날부터만 씁니다.",
+            f"- 실적 조건을 통과한 종목 수: 하루 평균 {flags[since].sum(axis=1).mean():.0f}개",
+        ]
     spy = data["Close"][MARKET]
     spy_ret = spy[spy.index >= pd.Timestamp(args.start)].pct_change().fillna(0.0)
     results = {}
@@ -167,6 +183,7 @@ def main() -> None:
           if args.set != "round2" else [
             "- 모든 전략은 S&P500이 200일 평균 아래면 새로 사지 않습니다(하락장 필터).",
             "- 파라미터는 널리 알려진 기본값 그대로이고, 이 데이터에 맞춰 조정하지 않았습니다."]),
+        *earn_lines,
         "- 절반 매도는 거래 1건으로 따로 셉니다. 승률·평균 거래수익은 이 건들을 모두 포함합니다.",
         "",
         "## 전략 설명",
