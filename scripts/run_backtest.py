@@ -2,6 +2,7 @@
 
     python scripts/run_backtest.py
     python scripts/run_backtest.py --universe all --start 2010-01-01 --split 2018-01-01 --cost-bps 20
+    python scripts/run_backtest.py --set round2      # the earlier momentum/gap/52-week candidates
 """
 from __future__ import annotations
 
@@ -15,7 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from swing import engine, metrics  # noqa: E402
 from swing.data import load_ohlc  # noqa: E402
-from swing.strategies import ALL  # noqa: E402
+from swing.legends import LEGENDS  # noqa: E402
+from swing.strategies import ALL, MomentumSwing  # noqa: E402
+
+SETS = {"legends": LEGENDS, "round2": ALL}
 from swing.universe import MARKET, UNIVERSES  # noqa: E402
 
 
@@ -70,6 +74,19 @@ def yearly(series: dict[str, pd.Series]) -> str:
     return "\n".join(out)
 
 
+def correlations(series: dict[str, pd.Series], refs: dict[str, pd.Series], since) -> str:
+    """Correlation of monthly returns in the OOS period: 1 = always move together."""
+    def monthly(r):
+        r = r[r.index >= since]
+        return (1 + r).groupby(r.index.to_period("M")).prod() - 1
+    out = ["| 전략 | " + " | ".join(refs) + " |", "|---" * (len(refs) + 1) + "|"]
+    for name, r in series.items():
+        m = monthly(r)
+        vals = [m.corr(monthly(ref)) for ref in refs.values()]
+        out.append(f"| {name} | " + " | ".join("-" if pd.isna(v) else f"{v:.2f}" for v in vals) + " |")
+    return "\n".join(out)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--start", default="2010-01-01", help="백테스트 시작일")
@@ -77,6 +94,8 @@ def main() -> None:
     ap.add_argument("--cost-bps", type=float, default=20.0, help="편도 거래비용 (bp)")
     ap.add_argument("--universe", default="large", choices=sorted(UNIVERSES),
                     help="large: 대형주, all: 대형주 + 중형주")
+    ap.add_argument("--set", default="legends", choices=sorted(SETS),
+                    help="legends: 전설 4인 규칙서, round2: 1·2차 후보")
     ap.add_argument("--out", default="reports")
     args = ap.parse_args()
 
@@ -88,7 +107,7 @@ def main() -> None:
     spy = data["Close"][MARKET]
     spy_ret = spy[spy.index >= pd.Timestamp(args.start)].pct_change().fillna(0.0)
     results = {}
-    for cls in ALL:
+    for cls in SETS[args.set]:
         strat = cls().prepare(data, market=MARKET)
         results[strat.label] = (strat, engine.run(strat, cost_bps=args.cost_bps, start=args.start))
 
@@ -114,18 +133,27 @@ def main() -> None:
         tr = r.trades[pd.to_datetime(r.trades["entry_date"]) >= split] if len(r.trades) else r.trades
         dbl[label] = stats(r.returns[m], tr, r.exposure[m])
 
+    mom = engine.run(MomentumSwing().prepare(data, market=MARKET), cost_bps=args.cost_bps,
+                     start=args.start).returns
+    corr = correlations({k: v[1].returns for k, v in results.items()},
+                        {"S&P500": spy_ret, "주간 모멘텀(이 앱)": mom}, split)
+
     end = spy.index[-1].date()
     lines = [
-        f"# 미국주식 스윙 후보 전략 백테스트 ({'대형주' if args.universe == 'large' else '대형주 + 중형주'})",
+        f"# 미국주식 스윙 {'전설 4인 규칙' if args.set == 'legends' else '후보 전략'} 백테스트 "
+        f"({'대형주' if args.universe == 'large' else '대형주 + 중형주'})",
         "",
         f"- 기간: {args.start} ~ {end} (학습 구간 {args.start} ~ {split.date()}, "
         f"**검증 구간 {split.date()} ~ {end}**)",
         f"- 종목: {'미국 대형주' if args.universe == 'large' else '미국 대형주 + 중형주'} {len(universe)}개 "
-        "(`swing/universe.py`), 동시 보유 최대 5종목, 종목당 계좌의 20%",
+        "(`swing/universe.py`). 보유 종목 수와 비중은 전략마다 다릅니다(아래 설명).",
         f"- 거래비용: 사고팔 때 각각 {args.cost_bps:.0f}bp ({args.cost_bps / 100:.2f}%)",
         "- 신호는 종가로 판단하고 다음 날 시가에 사고팝니다. 손절은 장중 저가로 확인합니다.",
-        "- 모든 전략은 S&P500이 200일 평균 아래면 새로 사지 않습니다(하락장 필터).",
-        "- 파라미터는 널리 알려진 기본값 그대로이고, 이 데이터에 맞춰 조정하지 않았습니다.",
+        *(["- 규칙은 문서 12장 '백테스트용 매매 규칙서' 그대로이고, 이 데이터에 맞춰 조정하지 "
+            "않았습니다. 시장 필터도 전략마다 다릅니다."] if args.set == "legends" else [
+            "- 모든 전략은 S&P500이 200일 평균 아래면 새로 사지 않습니다(하락장 필터).",
+            "- 파라미터는 널리 알려진 기본값 그대로이고, 이 데이터에 맞춰 조정하지 않았습니다."]),
+        "- 절반 매도는 거래 1건으로 따로 셉니다. 승률·평균 거래수익은 이 건들을 모두 포함합니다.",
         "",
         "## 전략 설명",
         "",
@@ -154,6 +182,13 @@ def main() -> None:
         "",
         table(dbl),
         "",
+        "## 다른 전략과 같이 움직이는 정도 (검증 구간 월수익률 상관계수)",
+        "",
+        "1에 가까우면 같이 오르고 같이 내립니다. 기존 앱과 함께 돌린다면 낮을수록 위험이 분산됩니다. "
+        "'주간 모멘텀(이 앱)'은 기존 퀀트 앱의 ETF 모멘텀과 같은 전략은 아니고 비슷한 성격의 참고용입니다.",
+        "",
+        corr,
+        "",
         "## 연도별 수익률",
         "",
         yearly({**{k: v[1].returns[v[1].returns.index >= pd.Timestamp(args.start)]
@@ -179,9 +214,10 @@ def main() -> None:
     ]
     out = Path(args.out)
     out.mkdir(exist_ok=True)
-    (out / f"swing_report_{args.universe}.md").write_text("\n".join(lines), encoding="utf-8")
+    suffix = args.universe if args.set == "legends" else f"{args.set}_{args.universe}"
+    (out / f"swing_report_{suffix}.md").write_text("\n".join(lines), encoding="utf-8")
     for label, (strat, res) in results.items():
-        res.trades.to_csv(out / f"trades_{args.universe}_{strat.name}.csv", index=False)
+        res.trades.to_csv(out / f"trades_{suffix}_{strat.name}.csv", index=False)
     print("\n".join(lines))
 
 

@@ -46,7 +46,20 @@ class Strategy:
         """Share of the account for a new position, decided at day i's close."""
         return 1 / self.max_positions
 
+    def accept_entry(self, ticker: str, i: int, price: float) -> bool:
+        """Last check at day i's open, e.g. skip a stock that gapped too far."""
+        return True
+
     def initial_stop(self, ticker: str, i: int, price: float) -> float | None:
+        return None
+
+    def take_profit(self, pos: dict, i: int) -> tuple[float, float, str] | None:
+        """(target price, share of the position to sell, reason) for day i, or None.
+
+        Checked during day i after stops; pos["high_max"] already includes
+        day i's high. A strategy may also change pos here (for example mark a
+        partial sale as done, or move the stop for tomorrow).
+        """
         return None
 
     def update_stop(self, pos: dict, i: int) -> float | None:

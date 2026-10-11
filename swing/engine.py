@@ -6,7 +6,10 @@ Timeline for each trading day i, which keeps the strategy from seeing the future
            Each buy gets the strategy's weight (at most 1/max_positions of the
            account, the per-stock limit).
 2. During the day: a stop loss fills at the stop price if the low touches it,
-           or at the open if the stock gaps below the stop.
+           or at the open if the stock gaps below the stop. Then a profit
+           target (if the strategy has one) fills at the target if the high
+           reaches it, or at the open on a gap above it. Stops are checked
+           first, the cautious assumption when both happen on one day.
 3. Close:  value the account, move trailing stops, and decide tomorrow's
            sells and buys from today's close.
 
@@ -51,15 +54,22 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
     equity, exposure = [], []
     last_close = c.ffill()
 
-    def close_trade(t: str, i: int, price: float, reason: str) -> None:
+    def close_trade(t: str, i: int, price: float, reason: str, frac: float = 1.0) -> None:
+        """Sell `frac` of the position (1.0 = all of it)."""
         nonlocal cash
-        pos = positions.pop(t)
-        cash += pos["shares"] * price * (1 - cost)
+        pos = positions[t]
+        shares = pos["shares"] if frac >= 1 else pos["shares"] * frac
+        part = shares / pos["initial_shares"]
+        cash += shares * price * (1 - cost)
+        if frac >= 1:
+            positions.pop(t)
+        else:
+            pos["shares"] -= shares
         net = price * (1 - cost) / (pos["entry_price"] * (1 + cost)) - 1
         trades.append({"ticker": t, "entry_date": dates[pos["entry_i"]].date(),
                        "entry_price": pos["entry_price"], "exit_date": dates[i].date(),
                        "exit_price": price, "return": net,
-                       "days": i - pos["entry_i"] + 1, "reason": reason})
+                       "days": i - pos["entry_i"] + 1, "reason": reason, "part": part})
 
     prev_equity = 1.0
     for i in range(first, len(dates)):
@@ -77,8 +87,10 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
             spend = min(budget, cash / (1 + cost))
             if spend < budget * 0.5:          # not enough cash left for a real slot
                 break
-            positions[t] = {"ticker": t, "shares": spend / px, "entry_price": px,
-                            "entry_i": i, "high_close": px,
+            if not strategy.accept_entry(t, i, px):
+                continue
+            positions[t] = {"ticker": t, "shares": spend / px, "initial_shares": spend / px,
+                            "entry_price": px, "entry_i": i, "high_close": px, "high_max": px,
                             "stop": strategy.initial_stop(t, i, px)}
             cash -= spend * (1 + cost)
         pending_buys = []
@@ -93,6 +105,21 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
                 close_trade(t, i, op, "손절 (갭 하락)")
             elif lo <= stop:
                 close_trade(t, i, stop, "손절")
+
+        # 2b. Intraday profit targets (full or partial sells).
+        for t in list(positions):
+            hi, op = h[t].iloc[i], o[t].iloc[i]
+            if pd.isna(hi):
+                continue
+            pos = positions[t]
+            pos["high_max"] = max(pos["high_max"], hi)
+            tp = strategy.take_profit(pos, i)
+            if tp is None:
+                continue
+            target, frac, reason = tp
+            if hi >= target:
+                fill = op if pos["entry_i"] < i and op > target else target
+                close_trade(t, i, fill, reason, frac)
 
         # 3. Close: value the account, then plan tomorrow.
         value = cash + sum(p["shares"] * last_close[t].iloc[i] for t, p in positions.items())
@@ -115,7 +142,8 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
 
     eq = pd.Series(equity, index=dates[first:first + len(equity)], name=strategy.name)
     exp = pd.Series(exposure, index=eq.index)
-    cols = ["ticker", "entry_date", "entry_price", "exit_date", "exit_price", "return", "days", "reason"]
+    cols = ["ticker", "entry_date", "entry_price", "exit_date", "exit_price", "return", "days",
+            "reason", "part"]
     open_pos = [{"ticker": t, "entry_date": dates[p["entry_i"]].date(),
                  "entry_price": p["entry_price"], "stop": p["stop"]} for t, p in positions.items()]
     return Result(strategy.name, eq, pd.DataFrame(trades, columns=cols), exp, open_pos)
