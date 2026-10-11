@@ -32,7 +32,13 @@ jobs:
         run: >
           python scripts/run_backtest.py --universe all --start ${{ inputs.start || '2010-01-01' }}
           --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
-      - run: cat reports/swing_report_large.md reports/swing_report_all.md >> "$GITHUB_STEP_SUMMARY"
+      - name: 전설 2그룹 (대형주 + 중형주)
+        run: >
+          python scripts/run_backtest.py --set legends2 --universe all --start ${{ inputs.start || '2010-01-01' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+      - run: >
+          cat reports/swing_report_large.md reports/swing_report_all.md
+          reports/swing_report_legends2_all.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: swing-report

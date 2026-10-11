@@ -2,7 +2,9 @@
 
 Timeline for each trading day i, which keeps the strategy from seeing the future:
 
-1. Open:   sell what yesterday's close said to sell, then buy yesterday's picks.
+1. Open:   sell what yesterday's close said to sell (all or part), then buy
+           yesterday's picks at the open, or at a buy-stop price during the
+           day if the strategy uses one (filled only if the high reaches it).
            Each buy gets the strategy's weight (at most 1/max_positions of the
            account, the per-stock limit).
 2. During the day: a stop loss fills at the stop price if the low touches it,
@@ -48,7 +50,7 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
 
     cash = 1.0
     positions: dict[str, dict] = {}
-    pending_sells: dict[str, str] = {}
+    pending_sells: dict[str, tuple[str, float]] = {}
     pending_buys: list[str] = []
     trades: list[dict] = []
     equity, exposure = [], []
@@ -75,10 +77,10 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
     prev_equity = 1.0
     for i in range(first, len(dates)):
         # 1. Open: sells first so their cash can fund today's buys.
-        for t, reason in list(pending_sells.items()):
+        for t, (reason, frac) in list(pending_sells.items()):
             if t in positions:
                 px = o[t].iloc[i]
-                close_trade(t, i, px if pd.notna(px) else last_close[t].iloc[i], reason)
+                close_trade(t, i, px if pd.notna(px) else last_close[t].iloc[i], reason, frac)
         pending_sells.clear()
         for t in pending_buys:
             px = o[t].iloc[i]
@@ -88,7 +90,8 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
             spend = min(budget, cash / (1 + cost))
             if spend < budget * 0.5:          # not enough cash left for a real slot
                 break
-            if not strategy.accept_entry(t, i, px):
+            px = strategy.entry_fill(t, i, px, h[t].iloc[i])
+            if px is None or not strategy.accept_entry(t, i, px):
                 continue
             positions[t] = {"ticker": t, "shares": spend / px, "initial_shares": spend / px,
                             "entry_price": px, "entry_i": i, "high_close": px, "high_max": px,
@@ -137,8 +140,9 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
             pos["stop"] = strategy.update_stop(pos, i)
             reason = strategy.exit_reason(pos, i)
             if reason:
-                pending_sells[t] = reason
-        free = n_max - (len(positions) - len(pending_sells))
+                pending_sells[t] = reason if isinstance(reason, tuple) else (reason, 1.0)
+        full_sells = sum(1 for _, frac in pending_sells.values() if frac >= 1)
+        free = n_max - (len(positions) - full_sells)
         if free > 0:
             pending_buys = [t for t in strategy.candidates(i) if t not in positions][:free]
 

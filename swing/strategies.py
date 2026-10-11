@@ -46,6 +46,14 @@ class Strategy:
         """Share of the account for a new position, decided at day i's close."""
         return 1 / self.max_positions
 
+    def entry_fill(self, ticker: str, i: int, open_: float, high: float) -> float | None:
+        """Fill price for a buy decided at day i-1's close: the open by default.
+
+        A buy-stop strategy returns its trigger price if day i's high reaches
+        it (or the open if the stock opens above it), else None (no trade).
+        """
+        return open_
+
     def accept_entry(self, ticker: str, i: int, price: float) -> bool:
         """Last check at day i's open, e.g. skip a stock that gapped too far."""
         return True
@@ -65,7 +73,8 @@ class Strategy:
     def update_stop(self, pos: dict, i: int) -> float | None:
         return pos.get("stop")
 
-    def exit_reason(self, pos: dict, i: int) -> str | None:
+    def exit_reason(self, pos: dict, i: int) -> str | tuple[str, float] | None:
+        """Why to sell at the next open, or (reason, share to sell) for a partial sale."""
         return None
 
 

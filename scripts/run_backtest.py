@@ -17,9 +17,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from swing import engine, metrics  # noqa: E402
 from swing.data import load_ohlc  # noqa: E402
 from swing.legends import LEGENDS  # noqa: E402
+from swing.legends2 import LEGENDS2  # noqa: E402
 from swing.strategies import ALL, MomentumSwing  # noqa: E402
 
-SETS = {"legends": LEGENDS, "round2": ALL}
+TITLES = {"legends": "전설 1그룹 규칙", "legends2": "전설 2그룹 규칙", "round2": "후보 전략"}
+SETS = {"legends": LEGENDS, "legends2": LEGENDS2, "round2": ALL}
 from swing.universe import MARKET, UNIVERSES  # noqa: E402
 
 
@@ -101,7 +103,7 @@ def main() -> None:
     ap.add_argument("--universe", default="large", choices=sorted(UNIVERSES),
                     help="large: 대형주, all: 대형주 + 중형주")
     ap.add_argument("--set", default="legends", choices=sorted(SETS),
-                    help="legends: 전설 4인 규칙서, round2: 1·2차 후보")
+                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보")
     ap.add_argument("--out", default="reports")
     args = ap.parse_args()
 
@@ -146,7 +148,7 @@ def main() -> None:
 
     end = spy.index[-1].date()
     lines = [
-        f"# 미국주식 스윙 {'전설 4인 규칙' if args.set == 'legends' else '후보 전략'} 백테스트 "
+        f"# 미국주식 스윙 {TITLES[args.set]} 백테스트 "
         f"({'대형주' if args.universe == 'large' else '대형주 + 중형주'})",
         "",
         f"- 기간: {args.start} ~ {end} (학습 구간 {args.start} ~ {split.date()}, "
@@ -155,8 +157,9 @@ def main() -> None:
         "(`swing/universe.py`). 보유 종목 수와 비중은 전략마다 다릅니다(아래 설명).",
         f"- 거래비용: 사고팔 때 각각 {args.cost_bps:.0f}bp ({args.cost_bps / 100:.2f}%)",
         "- 신호는 종가로 판단하고 다음 날 시가에 사고팝니다. 손절은 장중 저가로 확인합니다.",
-        *(["- 규칙은 문서 12장 '백테스트용 매매 규칙서' 그대로이고, 이 데이터에 맞춰 조정하지 "
-            "않았습니다. 시장 필터도 전략마다 다릅니다."] if args.set == "legends" else [
+        *([f"- 규칙은 문서 {'12' if args.set == 'legends' else '14'}장 매매 규칙서 그대로이고, "
+            "이 데이터에 맞춰 조정하지 않았습니다. 시장 필터도 전략마다 다릅니다."]
+          if args.set != "round2" else [
             "- 모든 전략은 S&P500이 200일 평균 아래면 새로 사지 않습니다(하락장 필터).",
             "- 파라미터는 널리 알려진 기본값 그대로이고, 이 데이터에 맞춰 조정하지 않았습니다."]),
         "- 절반 매도는 거래 1건으로 따로 셉니다. 승률·평균 거래수익은 이 건들을 모두 포함합니다.",
