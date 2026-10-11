@@ -35,16 +35,22 @@ def stats(ret: pd.Series, trades: pd.DataFrame | None = None,
         "최악의 달": s.get("worst_month", float("nan")),
     }
     if trades is not None:
-        row["거래수"] = len(trades)
-        row["승률"] = float((trades["return"] > 0).mean()) if len(trades) else float("nan")
-        row["평균 거래수익"] = float(trades["return"].mean()) if len(trades) else float("nan")
-        row["평균 보유일"] = float(trades["days"].mean()) if len(trades) else float("nan")
+        # A half sale is its own row; weight rows by the share of the position they sold,
+        # so one bought position counts once.
+        part = trades["part"] if "part" in trades else pd.Series(1.0, index=trades.index)
+        n = float(part.sum())
+        row["거래수"] = round(n)
+        row["승률"] = float(((trades["return"] > 0) * part).sum() / n) if n else float("nan")
+        row["평균 거래수익"] = float((trades["return"] * part).sum() / n) if n else float("nan")
+        row["평균 보유일"] = float((trades["days"] * part).sum() / n) if n else float("nan")
+        if "weight" in trades and n:
+            row["평균 비중"] = float((trades["weight"] * part).sum() / n)
     if exposure is not None:
         row["평균 투자비중"] = float(exposure.mean())
     return row
 
 
-PCT = {"연수익률", "월평균(복리)", "최대낙폭", "수익 난 달", "최악의 달", "승률", "평균 거래수익", "평균 투자비중"}
+PCT = {"평균 비중", "연수익률", "월평균(복리)", "최대낙폭", "수익 난 달", "최악의 달", "승률", "평균 거래수익", "평균 투자비중"}
 
 
 def table(rows: dict[str, dict]) -> str:
@@ -199,8 +205,12 @@ def main() -> None:
     ]
     for label, (_, res) in results.items():
         if len(res.trades):
-            g = res.trades.groupby("reason")["return"].agg(["count", "mean"])
-            parts = [f"{r} {int(n)}회(평균 {m * 100:+.1f}%)" for r, (n, m) in g.iterrows()]
+            tr = res.trades.assign(contrib=res.trades["return"] * res.trades["weight"]
+                                   * res.trades["part"])
+            g = tr.groupby("reason").agg(n=("return", "size"), mean=("return", "mean"),
+                                         contrib=("contrib", "sum"))
+            parts = [f"{r} {int(x.n)}회(평균 {x.mean * 100:+.1f}%, 계좌 기여 합계 {x.contrib * 100:+.0f}%p)"
+                     for r, x in g.iterrows()]
             lines.append(f"- **{label}**: " + ", ".join(parts))
     lines += [
         "",

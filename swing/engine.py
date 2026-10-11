@@ -69,7 +69,8 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
         trades.append({"ticker": t, "entry_date": dates[pos["entry_i"]].date(),
                        "entry_price": pos["entry_price"], "exit_date": dates[i].date(),
                        "exit_price": price, "return": net,
-                       "days": i - pos["entry_i"] + 1, "reason": reason, "part": part})
+                       "days": i - pos["entry_i"] + 1, "reason": reason, "part": part,
+                       "weight": pos["weight"]})
 
     prev_equity = 1.0
     for i in range(first, len(dates)):
@@ -91,6 +92,7 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
                 continue
             positions[t] = {"ticker": t, "shares": spend / px, "initial_shares": spend / px,
                             "entry_price": px, "entry_i": i, "high_close": px, "high_max": px,
+                            "weight": spend / prev_equity,
                             "stop": strategy.initial_stop(t, i, px)}
             cash -= spend * (1 + cost)
         pending_buys = []
@@ -143,7 +145,7 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
     eq = pd.Series(equity, index=dates[first:first + len(equity)], name=strategy.name)
     exp = pd.Series(exposure, index=eq.index)
     cols = ["ticker", "entry_date", "entry_price", "exit_date", "exit_price", "return", "days",
-            "reason", "part"]
+            "reason", "part", "weight"]
     open_pos = [{"ticker": t, "entry_date": dates[p["entry_i"]].date(),
                  "entry_price": p["entry_price"], "stop": p["stop"]} for t, p in positions.items()]
     return Result(strategy.name, eq, pd.DataFrame(trades, columns=cols), exp, open_pos)
