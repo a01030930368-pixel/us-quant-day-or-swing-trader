@@ -22,6 +22,7 @@ from swing.refine import REFINED  # noqa: E402
 from swing.earnings_legends import EARNINGS, EPS_MIN, SALES_MIN, WIDE  # noqa: E402
 from swing.fundamentals import growth_flags, load_facts  # noqa: E402
 from swing.reversion import REVERSION  # noqa: E402
+from swing.quality import QUALITY, profitability_table  # noqa: E402
 from swing.pead import HOLD_DAYS, PEAD_SET, SUE_MIN, sue_table  # noqa: E402
 from swing.strategies import ALL, MomentumSwing  # noqa: E402
 
@@ -29,11 +30,12 @@ TITLES = {"legends": "전설 1그룹 규칙", "legends2": "전설 2그룹 규칙
           "refine": "와인스타인·다바스 다듬기", "legends_all": "전설 1·2그룹 규칙",
           "earnings": "전설 규칙 + 실적 조건", "earnings_wide": "오닐·미너비니 + 실적 조건",
           "pead": "실적 서프라이즈 후 추세(PEAD)",
-          "reversion": "단기 과매도 반등"}
+          "reversion": "단기 과매도 반등",
+          "quality": "총이익률(품질) 장기 보유"}
 SETS = {"legends": LEGENDS, "legends2": LEGENDS2, "round2": ALL, "refine": REFINED,
-        "legends_all": LEGENDS + LEGENDS2, "earnings": EARNINGS, "earnings_wide": WIDE, "pead": PEAD_SET, "reversion": REVERSION}
+        "legends_all": LEGENDS + LEGENDS2, "earnings": EARNINGS, "earnings_wide": WIDE, "pead": PEAD_SET, "reversion": REVERSION, "quality": QUALITY}
 RULE_CHAPTERS = {"legends": "12장", "legends2": "14장", "refine": "12·14장",
-                 "legends_all": "12·14장", "earnings": "12·14·17장", "earnings_wide": "12·14·17장", "pead": "19장", "reversion": "20장"}
+                 "legends_all": "12·14장", "earnings": "12·14·17장", "earnings_wide": "12·14·17장", "pead": "19장", "reversion": "20장", "quality": "19·22장"}
 from swing.universe import MARKET, UNIVERSE_LABELS, tickers  # noqa: E402
 
 
@@ -115,7 +117,7 @@ def main() -> None:
     ap.add_argument("--universe", default="large", choices=sorted(UNIVERSE_LABELS),
                     help="large: 대형주, all: 대형주 + 중형주, small: 소형주, every: 전부, sp1500: S&P 1500")
     ap.add_argument("--set", default="legends", choices=sorted(SETS),
-                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교, earnings_wide: 오닐·미너비니 + 실적(넓은 종목용), pead: 실적 서프라이즈 후 추세, reversion: 단기 과매도 반등")
+                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교, earnings_wide: 오닐·미너비니 + 실적(넓은 종목용), pead: 실적 서프라이즈 후 추세, reversion: 단기 과매도 반등, quality: 총이익률 장기 보유")
     ap.add_argument("--low-cost-bps", type=float, default=None,
                     help="이 비용(편도 bp)으로도 다시 계산해 표를 덧붙임 (예: 키움 이벤트 수수료 7)")
     ap.add_argument("--out", default="reports")
@@ -138,6 +140,19 @@ def main() -> None:
             f"매출은 {cover['sales']}개 종목에서 받았습니다(은행 등 매출 항목이 다른 회사는 빠짐). "
             "공시한 다음 날부터만 씁니다.",
             f"- 실적 조건을 통과한 종목 수: 하루 평균 {flags[since].sum(axis=1).mean():.0f}개",
+        ]
+    if args.set == "quality":
+        facts = load_facts(universe)
+        gpa, gcovered = profitability_table(facts, data["Close"].index)
+        if gcovered == 0:
+            raise RuntimeError("SEC 실적 데이터를 하나도 받지 못했습니다. 접속이 막혔는지 확인하세요.")
+        data["GPA"] = gpa
+        data["SUE"], _ = sue_table(facts, data["Close"].index)
+        since = gpa.index >= pd.Timestamp(args.start)
+        earn_lines = [
+            f"- 실적 데이터: 미국 증권거래위원회(SEC) 공시. {len(universe)}개 중 {gcovered}개 종목에서 "
+            "총이익률을 계산했습니다(은행·보험처럼 매출원가가 없는 회사는 빠짐). 공시 다음 날부터 씁니다.",
+            f"- 하루 평균 {gpa[since].notna().sum(axis=1).mean():.0f}개 종목의 총이익률을 알 수 있었습니다.",
         ]
     if args.set == "pead":
         sue, covered = sue_table(load_facts(universe), data["Close"].index)

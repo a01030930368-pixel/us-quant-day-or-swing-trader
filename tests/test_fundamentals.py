@@ -103,3 +103,45 @@ def test_pead_no_lookahead_and_holds_60_days(cls):
     assert names[1] not in set(r1.trades["ticker"])
     if cls.name == "pead":
         assert len(r1.trades) and (r1.trades.query("reason != '손절'")["days"] == 61).all()   # open to open: 60 days, counted inclusive
+
+
+def _gp_facts():
+    q = lambda s, e, v, f: {"start": s, "end": e, "val": v, "filed": f, "form": "10-Q"}
+    a = lambda e, v, f: {"end": e, "val": v, "filed": f, "form": "10-Q"}
+    gp = [q("2020-01-01", "2020-03-31", 10, "2020-05-01"), q("2020-04-01", "2020-06-30", 10, "2020-08-01"),
+          q("2020-07-01", "2020-09-30", 10, "2020-11-02"), q("2020-10-01", "2020-12-31", 10, "2021-02-01"),
+          q("2021-01-01", "2021-03-31", 20, "2021-05-03")]
+    assets = [a("2020-12-31", 200, "2021-02-01"), a("2021-03-31", 400, "2021-05-03")]
+    return {"facts": {"us-gaap": {"GrossProfit": {"units": {"USD": gp}},
+                                  "Assets": {"units": {"USD": assets}}}}}
+
+
+def test_gross_profitability_point_in_time():
+    from swing.quality import profitability_events, profitability_table
+    ev = profitability_events(_gp_facts())
+    assert list(ev["gpa"]) == pytest.approx([40 / 200, 50 / 400])
+    idx = pd.bdate_range("2021-01-01", "2021-12-31")
+    tab, n = profitability_table({"AAA": _gp_facts()}, idx)
+    assert n == 1 and tab.loc[:"2021-02-01", "AAA"].isna().all()      # filing day: not known yet
+    assert tab.loc["2021-02-02", "AAA"] == pytest.approx(0.2)
+    assert tab.loc["2021-05-04", "AAA"] == pytest.approx(0.125)
+
+
+@pytest.mark.parametrize("cls", __import__("swing.quality", fromlist=["QUALITY"]).QUALITY)
+def test_quality_no_lookahead(cls):
+    d1 = make_ohlc(n_days=1100, seed=4, drift=0.0008)
+    rng = np.random.default_rng(0)
+    d1["GPA"] = pd.DataFrame(rng.uniform(0, 1, size=d1["Close"].shape), index=d1["Close"].index,
+                             columns=d1["Close"].columns).rolling(60).mean()
+    sue = pd.DataFrame(np.nan, index=d1["Close"].index, columns=d1["Close"].columns)
+    sue.iloc[300::50, :3] = 3.0
+    d1["SUE"] = sue
+    d2 = {f: v.copy() for f, v in d1.items()}
+    k = 800
+    for f in ("Open", "High", "Low", "Close", "Volume", "GPA"):
+        d2[f].iloc[k + 1:] *= 1.5
+    e1 = engine.run(cls().prepare(d1), cost_bps=25).equity
+    e2 = engine.run(cls().prepare(d2), cost_bps=25).equity
+    pd.testing.assert_series_equal(e1.iloc[:k + 1], e2.iloc[:k + 1])
+    r = engine.run(cls().prepare(d1), cost_bps=25)
+    assert len(r.trades) + len(r.open_positions) > 0      # with 5 stocks the top-40 rule never sells
