@@ -82,3 +82,23 @@ def test_position_limits_and_cash(ohlc):
                 day = pd.Timestamp(day).date()
                 open_n = ((tr["entry_date"] <= day) & (tr["exit_date"] > day)).sum()
                 assert open_n <= s.max_positions
+
+
+def test_bear_exit_sells_everything():
+    from swing.strategies import MomentumBearExit
+    d = make_ohlc(seed=2)
+    s = MomentumBearExit().prepare(d)
+    res = engine.run(s, cost_bps=20)
+    bear_days = s.market_ok[~s.market_ok].index
+    # The day after any bear close, nothing is held at the close.
+    for day in bear_days[:-1]:
+        nxt = d["Close"].index[d["Close"].index.get_loc(day) + 1]
+        assert res.exposure[nxt] < 1e-9
+
+
+def test_vol_weight_capped():
+    from swing.strategies import MomentumBearExitVol
+    s = MomentumBearExitVol().prepare(make_ohlc())
+    for i in range(30, 300, 37):
+        for t in s.tradable:
+            assert 0 < s.weight(t, i) <= 0.2 + 1e-12

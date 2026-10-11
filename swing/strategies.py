@@ -41,6 +41,10 @@ class Strategy:
     def candidates(self, i: int) -> list[str]:
         raise NotImplementedError
 
+    def weight(self, ticker: str, i: int) -> float:
+        """Share of the account for a new position, decided at day i's close."""
+        return 1 / self.max_positions
+
     def initial_stop(self, ticker: str, i: int, price: float) -> float | None:
         return None
 
@@ -170,4 +174,43 @@ class MomentumSwing(Strategy):
         return None
 
 
-ALL = [Pullback, Breakout, MomentumSwing]
+class MomentumBearExit(MomentumSwing):
+    """Weekly momentum that also sells everything when the market turns down.
+
+    The plain version only stops buying in a bear market and keeps what it
+    holds, which is where its -37% drawdown came from.
+    """
+    name = "momentum_bear"
+    label = "주간 모멘텀 + 하락장 매도"
+    description = ("주간 모멘텀과 같지만, S&P500 종가가 200일 평균 아래로 내려가면 "
+                   "보유 종목을 모두 팔고 현금으로 기다립니다.")
+
+    def exit_reason(self, pos: dict, i: int) -> str | None:
+        if not self.market_ok.iloc[i]:
+            return "하락장 전량 매도"
+        return super().exit_reason(pos, i)
+
+
+class MomentumBearExitVol(MomentumBearExit):
+    """Adds volatility sizing: jumpy stocks get a smaller slice.
+
+    A stock whose typical daily move (ATR) is 2% of its price gets the full
+    20%; one that moves 4% a day gets 10%. Unused money stays in cash.
+    """
+    name = "momentum_bear_vol"
+    label = "주간 모멘텀 + 하락장 매도 + 변동성 비중"
+    description = ("위 전략에 더해, 하루 변동폭이 큰 종목은 적게 삽니다 "
+                   "(하루 평균 2% 움직이면 20%, 4% 움직이면 10%).")
+    risk_per_atr = 0.004
+
+    def _prepare(self) -> None:
+        super()._prepare()
+        self.atr_pct = atr(self.h, self.l, self.c, 20) / self.c
+
+    def weight(self, ticker: str, i: int) -> float:
+        a = self.atr_pct[ticker].iloc[i]
+        cap = 1 / self.max_positions
+        return cap if pd.isna(a) or a <= 0 else min(cap, self.risk_per_atr / a)
+
+
+ALL = [Pullback, Breakout, MomentumSwing, MomentumBearExit, MomentumBearExitVol]

@@ -3,7 +3,8 @@
 Timeline for each trading day i, which keeps the strategy from seeing the future:
 
 1. Open:   sell what yesterday's close said to sell, then buy yesterday's picks.
-           Each buy gets 1/max_positions of the account (the per-stock limit).
+           Each buy gets the strategy's weight (at most 1/max_positions of the
+           account, the per-stock limit).
 2. During the day: a stop loss fills at the stop price if the low touches it,
            or at the open if the stock gaps below the stop.
 3. Close:  value the account, move trailing stops, and decide tomorrow's
@@ -68,11 +69,11 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
                 px = o[t].iloc[i]
                 close_trade(t, i, px if pd.notna(px) else last_close[t].iloc[i], reason)
         pending_sells.clear()
-        budget = prev_equity / n_max
         for t in pending_buys:
             px = o[t].iloc[i]
             if len(positions) >= n_max or t in positions or pd.isna(px) or px <= 0:
                 continue
+            budget = prev_equity * strategy.weight(t, i - 1)
             spend = min(budget, cash / (1 + cost))
             if spend < budget * 0.5:          # not enough cash left for a real slot
                 break
