@@ -1,0 +1,34 @@
+# 실제 가격 데이터로 스윙 후보 전략을 백테스트합니다.
+# GitHub 웹에서 Actions 탭 -> backtest -> Run workflow 를 누르거나, PR이 올라오면 자동으로 돕니다.
+# 결과는 실행 화면의 Summary와 첨부파일(swing-report)에 남습니다.
+name: backtest
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "백테스트 시작일"
+        default: "2010-01-01"
+      split:
+        description: "검증(OOS) 시작일"
+        default: "2018-01-01"
+      cost_bps:
+        description: "편도 거래비용 (bp)"
+        default: "20"
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: >
+          python scripts/run_backtest.py --start ${{ inputs.start || '2010-01-01' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+      - run: cat reports/swing_report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: swing-report
+          path: reports/
