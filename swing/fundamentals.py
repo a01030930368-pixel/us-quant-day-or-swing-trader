@@ -34,6 +34,10 @@ EPS_TAGS = ["EarningsPerShareDiluted", "EarningsPerShareBasic"]
 SALES_TAGS = ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax",
               "SalesRevenueNet", "RevenueFromContractWithCustomerIncludingAssessedTax",
               "SalesRevenueGoodsNet"]
+GROSS_TAGS = ["GrossProfit"]
+COGS_TAGS = ["CostOfRevenue", "CostOfGoodsAndServicesSold", "CostOfGoodsSold"]
+ASSET_TAGS = ["Assets"]
+KEEP_TAGS = EPS_TAGS + SALES_TAGS + GROSS_TAGS + COGS_TAGS + ASSET_TAGS
 
 
 def _get(url: str) -> dict:
@@ -135,9 +139,9 @@ def daily_flags(growth: pd.DataFrame, index: pd.DatetimeIndex, minimum: float,
 
 
 def _slim(facts: dict) -> dict:
-    """Keep only the EPS and sales tags (a full file can be several MB)."""
+    """Keep only the tags the strategies use (a full file can be several MB)."""
     gaap = facts.get("facts", {}).get("us-gaap", {})
-    return {"facts": {"us-gaap": {k: gaap[k] for k in EPS_TAGS + SALES_TAGS if k in gaap}}}
+    return {"facts": {"us-gaap": {k: gaap[k] for k in KEEP_TAGS if k in gaap}}}
 
 
 def load_facts(tickers: list[str], use_cache: bool = True) -> dict[str, dict]:
