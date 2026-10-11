@@ -43,14 +43,18 @@ KEEP_TAGS = EPS_TAGS + SALES_TAGS + GROSS_TAGS + COGS_TAGS + ASSET_TAGS
 def _get(url: str) -> dict:
     import requests
 
-    for attempt in range(4):
-        r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
+    for attempt in range(5):
+        try:
+            r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
+        except (requests.ConnectionError, requests.Timeout):
+            time.sleep(2 ** attempt)                   # the SEC server sometimes stalls: try again
+            continue
         if r.status_code == 200:
             return r.json()
         if r.status_code == 404:
             return {}
         time.sleep(2 ** attempt)
-    r.raise_for_status()
+    print(f"SEC 데이터를 받지 못해 건너뜁니다: {url}")
     return {}
 
 
