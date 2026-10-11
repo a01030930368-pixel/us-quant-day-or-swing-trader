@@ -1,7 +1,7 @@
 """Backtest every swing candidate and write reports/swing_report_<universe>.md.
 
     python scripts/run_backtest.py
-    python scripts/run_backtest.py --universe all --start 2010-01-01 --split 2018-01-01 --cost-bps 20
+    python scripts/run_backtest.py --universe all --start 2010-01-01 --split 2018-01-01 --cost-bps 25
     python scripts/run_backtest.py --set round2      # the earlier momentum/gap/52-week candidates
 """
 from __future__ import annotations
@@ -111,7 +111,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--start", default="2010-01-01", help="백테스트 시작일")
     ap.add_argument("--split", default="2018-01-01", help="검증(OOS) 구간 시작일")
-    ap.add_argument("--cost-bps", type=float, default=20.0, help="편도 거래비용 (bp)")
+    ap.add_argument("--cost-bps", type=float, default=25.0, help="편도 거래비용 (bp, 키움 미국주식 기본 수수료 0.25%%)")
     ap.add_argument("--universe", default="large", choices=sorted(UNIVERSE_LABELS),
                     help="large: 대형주, all: 대형주 + 중형주, small: 소형주, every: 전부, sp1500: S&P 1500")
     ap.add_argument("--set", default="legends", choices=sorted(SETS),
