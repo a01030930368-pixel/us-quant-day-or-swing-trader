@@ -1,4 +1,4 @@
-"""Stocks the backtest may trade: about 100 large, liquid US companies.
+"""Stocks the backtest may trade: large, mid-sized and small US companies.
 
 These are today's big names, so the list quietly leaves out companies that
 shrank or disappeared since 2010 (survivorship bias). Results look somewhat
@@ -39,6 +39,32 @@ MID_CAPS = [
     "CHD", "CLX", "HSY", "INGR", "DAR",
 ]
 
-UNIVERSES = {"large": LARGE_CAPS, "all": LARGE_CAPS + MID_CAPS}
+# Small companies (mostly Russell 2000 / S&P SmallCap 600 names today), the
+# kind of fast-moving stocks most swing legends traded. Survivorship cuts both
+# ways here: small caps that went bust are missing (results look better), but
+# small caps that grew into large caps are missing too (results look worse).
+SMALL_CAPS = [
+    "AAON", "ACLS", "AEIS", "AEO", "ALKS", "AMKR", "AMN", "ANF", "ARCB", "ARWR",
+    "ASGN", "ATGE", "AVAV", "AVNT", "AX", "AZZ", "BCC", "BCPC", "BDC", "BJRI",
+    "BKE", "BL", "BLKB", "BMI", "BOOT", "BOX", "CAKE", "CALM", "CALX", "CARG",
+    "CATY", "CBRL", "CENTA", "CEVA", "CHEF", "CMC", "CNMD", "COHU", "CORT", "CPRX",
+    "CRUS", "CRVL", "CSGS", "CSWI", "CVCO", "CVLT", "DIOD", "DORM", "DY", "ECPG",
+    "EGHT", "ENSG", "EPAC", "ESE", "EXLS", "EXPO", "FELE", "FN", "FORM", "FSS",
+    "GBX", "GES", "GIII", "GMS", "GPI", "HALO", "HCSG", "HELE", "HIBB", "HLIT",
+    "HQY", "HWKN", "IART", "IDCC", "IIIN", "INSM", "IOSP", "IPAR", "IRBT", "ITGR",
+    "ITRI", "JACK", "JBSS", "JOE", "KAI", "KALU", "KLIC", "KNSL", "KTOS", "LANC",
+    "LGND", "LNTH", "LOPE", "LPX", "LZB", "MATX", "MED", "MGPI", "MHO", "MLI",
+    "MMSI", "MOD", "MTH", "MYGN", "MYRG", "NEOG", "NOVT", "NSIT", "NX", "OFIX",
+    "OII", "OSIS", "OXM", "PATK", "PDFS", "PLAB", "PLUS", "PLXS", "POWI", "PRGS",
+    "PRIM", "QLYS", "RAMP", "RDNT", "RGEN", "ROCK", "SANM", "SCSC", "SHOO", "SIG",
+    "SKYW", "SLAB", "SMTC", "SPSC", "SSTK", "STAA", "STRL", "SUPN", "SXI", "TBBK",
+    "TNC", "TREX", "TTEC", "TTMI", "UCTT", "UFPI", "UFPT", "USPH", "VECO", "VICR",
+    "VRTS", "WDFC", "WGO", "WING", "WIRE", "WOR", "YELP", "ZUMZ",
+]
+
+UNIVERSES = {"large": LARGE_CAPS, "all": LARGE_CAPS + MID_CAPS,
+             "small": SMALL_CAPS, "every": LARGE_CAPS + MID_CAPS + SMALL_CAPS}
+UNIVERSE_LABELS = {"large": "미국 대형주", "all": "미국 대형주 + 중형주",
+                   "small": "미국 소형주", "every": "미국 대형주 + 중형주 + 소형주"}
 
 MARKET = "SPY"

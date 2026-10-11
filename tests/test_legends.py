@@ -158,3 +158,33 @@ def test_buy_stop_fill_and_partial_at_open():
     t = res.trades.iloc[0]
     assert t["entry_price"] == 103 and t["exit_price"] == d["Open"]["AAA"].iloc[3]
     assert abs(t["part"] - 1 / 3) < 1e-12 and len(res.open_positions) == 1
+
+
+from swing.refine import REFINED, WeinsteinDarvas  # noqa: E402
+
+
+@pytest.mark.parametrize("cls", REFINED)
+def test_refined_no_lookahead_and_limits(cls):
+    d1 = make_ohlc(n_days=1100, seed=7, drift=0.0012)
+    d2 = {f: v.copy() for f, v in d1.items()}
+    k = 800
+    for f in d2:
+        d2[f].iloc[k + 1:] *= 1.5
+    r1 = engine.run(cls().prepare(d1), cost_bps=20)
+    e2 = engine.run(cls().prepare(d2), cost_bps=20).equity
+    pd.testing.assert_series_equal(r1.equity.iloc[:k + 1], e2.iloc[:k + 1])
+    assert (r1.exposure <= 1 + 1e-9).all() and (r1.equity > 0).all()
+
+
+def test_combo_follows_the_rules_of_the_strategy_that_bought():
+    d = make_ohlc(n_days=1100, seed=8, drift=0.0012)
+    s = WeinsteinDarvas().prepare(d)
+    res = engine.run(s, cost_bps=20)
+    weinstein_only = {"주간 종가 30주선 이탈"}
+    darvas_only = {"3주 무수익"}
+    for _, tr in res.trades.iterrows():
+        owner = type(s.owner[tr["ticker"]]).__name__ if tr["ticker"] in s.owner else None
+        if tr["reason"] in weinstein_only:
+            assert owner in ("Weinstein", None)
+        if tr["reason"] in darvas_only:
+            assert owner in ("Darvas", None)

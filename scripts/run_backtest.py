@@ -18,11 +18,16 @@ from swing import engine, metrics  # noqa: E402
 from swing.data import load_ohlc  # noqa: E402
 from swing.legends import LEGENDS  # noqa: E402
 from swing.legends2 import LEGENDS2  # noqa: E402
+from swing.refine import REFINED  # noqa: E402
 from swing.strategies import ALL, MomentumSwing  # noqa: E402
 
-TITLES = {"legends": "전설 1그룹 규칙", "legends2": "전설 2그룹 규칙", "round2": "후보 전략"}
-SETS = {"legends": LEGENDS, "legends2": LEGENDS2, "round2": ALL}
-from swing.universe import MARKET, UNIVERSES  # noqa: E402
+TITLES = {"legends": "전설 1그룹 규칙", "legends2": "전설 2그룹 규칙", "round2": "후보 전략",
+          "refine": "와인스타인·다바스 다듬기", "legends_all": "전설 1·2그룹 규칙"}
+SETS = {"legends": LEGENDS, "legends2": LEGENDS2, "round2": ALL, "refine": REFINED,
+        "legends_all": LEGENDS + LEGENDS2}
+RULE_CHAPTERS = {"legends": "12장", "legends2": "14장", "refine": "12·14장",
+                 "legends_all": "12·14장"}
+from swing.universe import MARKET, UNIVERSE_LABELS, UNIVERSES  # noqa: E402
 
 
 def stats(ret: pd.Series, trades: pd.DataFrame | None = None,
@@ -101,9 +106,9 @@ def main() -> None:
     ap.add_argument("--split", default="2018-01-01", help="검증(OOS) 구간 시작일")
     ap.add_argument("--cost-bps", type=float, default=20.0, help="편도 거래비용 (bp)")
     ap.add_argument("--universe", default="large", choices=sorted(UNIVERSES),
-                    help="large: 대형주, all: 대형주 + 중형주")
+                    help="large: 대형주, all: 대형주 + 중형주, small: 소형주, every: 전부")
     ap.add_argument("--set", default="legends", choices=sorted(SETS),
-                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보")
+                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부")
     ap.add_argument("--out", default="reports")
     args = ap.parse_args()
 
@@ -149,15 +154,15 @@ def main() -> None:
     end = spy.index[-1].date()
     lines = [
         f"# 미국주식 스윙 {TITLES[args.set]} 백테스트 "
-        f"({'대형주' if args.universe == 'large' else '대형주 + 중형주'})",
+        f"({UNIVERSE_LABELS[args.universe].removeprefix('미국 ')})",
         "",
         f"- 기간: {args.start} ~ {end} (학습 구간 {args.start} ~ {split.date()}, "
         f"**검증 구간 {split.date()} ~ {end}**)",
-        f"- 종목: {'미국 대형주' if args.universe == 'large' else '미국 대형주 + 중형주'} {len(universe)}개 "
+        f"- 종목: {UNIVERSE_LABELS[args.universe]} {len(universe)}개 "
         "(`swing/universe.py`). 보유 종목 수와 비중은 전략마다 다릅니다(아래 설명).",
         f"- 거래비용: 사고팔 때 각각 {args.cost_bps:.0f}bp ({args.cost_bps / 100:.2f}%)",
         "- 신호는 종가로 판단하고 다음 날 시가에 사고팝니다. 손절은 장중 저가로 확인합니다.",
-        *([f"- 규칙은 문서 {'12' if args.set == 'legends' else '14'}장 매매 규칙서 그대로이고, "
+        *([f"- 규칙은 문서 {RULE_CHAPTERS[args.set]} 매매 규칙서 그대로이고, "
             "이 데이터에 맞춰 조정하지 않았습니다. 시장 필터도 전략마다 다릅니다."]
           if args.set != "round2" else [
             "- 모든 전략은 S&P500이 200일 평균 아래면 새로 사지 않습니다(하락장 필터).",
@@ -219,8 +224,10 @@ def main() -> None:
         "",
         "## 주의",
         "",
-        "- 종목 목록이 지금의 대형주라서, 그동안 망하거나 작아진 회사가 빠져 있습니다. "
-        "실제보다 결과가 좋게 나오므로 상한선으로 보세요.",
+        *(["- 종목 목록이 지금의 대형주라서, 그동안 망하거나 작아진 회사가 빠져 있습니다. "
+           "실제보다 결과가 좋게 나오므로 상한선으로 보세요."] if args.universe != "small" else [
+           "- 종목 목록이 지금의 소형주입니다. 그동안 망한 회사가 빠져 결과가 좋아 보이는 쪽과, "
+           "크게 성장해 대형주가 된 회사가 빠져 결과가 나빠 보이는 쪽이 함께 있습니다."]),
         "- 소수점 주식으로 계산했습니다. 실제로는 1주 단위라 작은 계좌일수록 조금 달라집니다.",
         "- 세금(해외주식 양도세 22%)과 환율 변동은 넣지 않았습니다.",
         "",
