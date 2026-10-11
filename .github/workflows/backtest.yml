@@ -32,7 +32,31 @@ jobs:
         run: >
           python scripts/run_backtest.py --universe all --start ${{ inputs.start || '2010-01-01' }}
           --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
-      - run: cat reports/swing_report_large.md reports/swing_report_all.md >> "$GITHUB_STEP_SUMMARY"
+      - name: 전설 2그룹 (대형주 + 중형주)
+        run: >
+          python scripts/run_backtest.py --set legends2 --universe all --start ${{ inputs.start || '2010-01-01' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+      - name: 와인스타인·다바스 다듬기 (대형주 + 중형주)
+        run: >
+          python scripts/run_backtest.py --set refine --universe all --start ${{ inputs.start || '2010-01-01' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+      - name: 전설 1·2그룹 (소형주)
+        run: >
+          python scripts/run_backtest.py --set legends_all --universe small --start ${{ inputs.start || '2010-01-01' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+      - name: 전설 규칙 + 실적 조건 (대형주 + 중형주)
+        run: >
+          python scripts/run_backtest.py --set earnings --universe all --start ${{ inputs.start || '2010-01-01' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+      - name: 오닐·미너비니 + 실적 조건 (S&P 1500)
+        run: >
+          python scripts/run_backtest.py --set earnings_wide --universe sp1500 --start ${{ inputs.start || '2010-01-01' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+      - run: >
+          cat reports/swing_report_large.md reports/swing_report_all.md
+          reports/swing_report_legends2_all.md reports/swing_report_refine_all.md
+          reports/swing_report_legends_all_small.md reports/swing_report_earnings_all.md
+          reports/swing_report_earnings_wide_sp1500.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: swing-report

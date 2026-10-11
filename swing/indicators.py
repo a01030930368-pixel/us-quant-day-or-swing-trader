@@ -24,3 +24,22 @@ def atr(high: pd.DataFrame, low: pd.DataFrame, close: pd.DataFrame, n: int) -> p
     tr = pd.concat([high - low, (high - prev).abs(), (low - prev).abs()]).groupby(level=0).max()
     tr = tr.reindex(close.index)
     return tr.ewm(alpha=1 / n, min_periods=n, adjust=False).mean()
+
+
+def ema(close: pd.DataFrame, n: int) -> pd.DataFrame:
+    return close.ewm(span=n, min_periods=n, adjust=False).mean()
+
+
+def adx(high: pd.DataFrame, low: pd.DataFrame, close: pd.DataFrame, n: int = 14):
+    """Wilder's ADX with +DI and -DI. ADX above ~25-30 = a strong trend either way."""
+    up, down = high.diff(), -low.diff()
+    plus_dm = up.where((up > down) & (up > 0), 0.0)
+    minus_dm = down.where((down > up) & (down > 0), 0.0)
+    tr = atr(high, low, close, 1)          # true range (EWM with alpha 1 = itself)
+    def wilder(x):
+        return x.ewm(alpha=1 / n, min_periods=n, adjust=False).mean()
+    atr_n = wilder(tr)
+    plus_di = 100 * wilder(plus_dm) / atr_n
+    minus_di = 100 * wilder(minus_dm) / atr_n
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    return wilder(dx), plus_di, minus_di
