@@ -23,6 +23,7 @@ class Strategy:
     label = ""
     description = ""
     max_positions = 5
+    order_all = False                # True: send every candidate, the engine fills until slots run out
 
     def prepare(self, d: dict[str, pd.DataFrame], market: str = "SPY") -> "Strategy":
         self.o, self.h, self.l, self.c = d["Open"], d["High"], d["Low"], d["Close"]

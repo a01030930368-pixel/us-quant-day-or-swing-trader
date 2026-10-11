@@ -144,7 +144,9 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
         full_sells = sum(1 for _, frac in pending_sells.values() if frac >= 1)
         free = n_max - (len(positions) - full_sells)
         if free > 0:
-            pending_buys = [t for t in strategy.candidates(i) if t not in positions][:free]
+            picks = [t for t in strategy.candidates(i) if t not in positions]
+            # Limit-order strategies place an order for every signal; most never fill.
+            pending_buys = picks if getattr(strategy, "order_all", False) else picks[:free]
 
     eq = pd.Series(equity, index=dates[first:first + len(equity)], name=strategy.name)
     exp = pd.Series(exposure, index=eq.index)
