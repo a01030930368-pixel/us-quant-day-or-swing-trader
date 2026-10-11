@@ -26,6 +26,7 @@ class Strategy:
 
     def prepare(self, d: dict[str, pd.DataFrame], market: str = "SPY") -> "Strategy":
         self.o, self.h, self.l, self.c = d["Open"], d["High"], d["Low"], d["Close"]
+        self.v = d.get("Volume")
         self.market = market
         self.sma200 = sma(self.c, 200)
         # Market filter: only open new positions while the S&P 500 is above
@@ -147,10 +148,15 @@ class MomentumSwing(Strategy):
     def _prepare(self) -> None:
         self.sma50 = sma(self.c, 50)
         self.score = self.c.shift(5) / self.c.shift(126) - 1
-        idx = self.c.index
+        self.week_end = self._week_ends(self.c.index)
+
+    @staticmethod
+    def _week_ends(idx: pd.DatetimeIndex):
+        """True on the last trading day of each week."""
         week = pd.Series(idx.to_period("W-FRI"), index=idx)
-        self.week_end = (week != week.shift(-1)).to_numpy().copy()
-        self.week_end[-1] = idx[-1].dayofweek == 4
+        out = (week != week.shift(-1)).to_numpy().copy()
+        out[-1] = idx[-1].dayofweek == 4
+        return out
 
     def _ranked(self, i: int) -> pd.Series:
         c = self.c.iloc[i]
@@ -213,4 +219,96 @@ class MomentumBearExitVol(MomentumBearExit):
         return cap if pd.isna(a) or a <= 0 else min(cap, self.risk_per_atr / a)
 
 
-ALL = [Pullback, Breakout, MomentumSwing, MomentumBearExit, MomentumBearExitVol]
+class EarningsGap(Strategy):
+    """Follow a stock that jumps on big news (usually earnings) and keeps its gain.
+
+    Post-earnings drift: after a strong surprise, prices tend to keep moving
+    the same way for weeks because investors react slowly. Without earnings
+    data we spot the event from price and volume: the stock opens at least 4%
+    above yesterday's close on at least 3x its usual volume and closes above
+    its open. Buy the next open, stop at the gap day's low, sell when the close
+    drops below the 20-day average or after 60 trading days.
+    """
+    name = "earnings_gap"
+    label = "실적 갭 상승 추종"
+    description = ("평소 3배 넘는 거래량으로 4% 이상 갭 상승하고 그날 시가 위에서 끝난 종목"
+                   "(대개 실적 발표)을 다음 날 삽니다. 손절은 갭 당일 저가, 20일 평균을 "
+                   "깨거나 60거래일이 지나면 팝니다.")
+    gap = 0.04
+    vol_mult = 3.0
+    max_days = 60
+
+    def _prepare(self) -> None:
+        if self.v is None:
+            raise ValueError("실적 갭 전략에는 거래량 데이터가 필요합니다.")
+        self.sma20 = sma(self.c, 20)
+        avg_vol = self.v.rolling(50, min_periods=50).mean().shift(1)
+        gap = self.o / self.c.shift(1) - 1
+        self.signal = ((gap >= self.gap) & (self.v >= self.vol_mult * avg_vol)
+                       & (self.c > self.o))
+        self.gap_size = gap
+
+    def candidates(self, i: int) -> list[str]:
+        if not self.market_ok.iloc[i]:
+            return []
+        hit = self.signal.iloc[i].reindex(self.tradable).fillna(False).astype(bool)
+        return list(self.gap_size.iloc[i][hit[hit].index].sort_values(ascending=False).index)
+
+    def initial_stop(self, ticker: str, i: int, price: float) -> float:
+        low = self.l[ticker].iloc[i - 1]
+        return low if pd.notna(low) and low < price else price * 0.92
+
+    def exit_reason(self, pos: dict, i: int) -> str | None:
+        t = pos["ticker"]
+        if i - pos["entry_i"] >= 3 and self.c[t].iloc[i] < self.sma20[t].iloc[i]:
+            return "20일 평균 이탈"
+        if i - pos["entry_i"] + 1 >= self.max_days:
+            return "보유기간 만료"
+        return None
+
+
+class HighProximity(Strategy):
+    """Each Friday hold the stocks closest to their 52-week high.
+
+    George & Hwang (2004): investors anchor on the 52-week high and hesitate to
+    buy near it, so stocks close to it tend to keep rising. Hold the 5 stocks
+    with the highest close / 52-week-high ratio (above their 200-day average);
+    sell when the ratio drops below 0.85, the stock falls out of the top 15, or
+    at a 10% stop loss.
+    """
+    name = "high52"
+    label = "52주 신고가 근접"
+    description = ("매주 금요일, 52주 최고가에 가장 가까운 종목 5개를 보유합니다. 최고가 대비 "
+                   "15% 넘게 밀리거나 순위가 15위 밖이면 팔고, 손절 -10%.")
+    stop_pct = 0.10
+    keep_rank = 15
+    floor = 0.85
+
+    def _prepare(self) -> None:
+        self.ratio = self.c / self.c.rolling(252, min_periods=252).max()
+        self.week_end = MomentumSwing._week_ends(self.c.index)
+
+    def _ranked(self, i: int) -> pd.Series:
+        ok = self.c.iloc[i] > self.sma200.iloc[i]
+        return self.ratio.iloc[i][ok].reindex(self.tradable).dropna().sort_values(ascending=False)
+
+    def candidates(self, i: int) -> list[str]:
+        if not self.week_end[i] or not self.market_ok.iloc[i]:
+            return []
+        return list(self._ranked(i).index)
+
+    def initial_stop(self, ticker: str, i: int, price: float) -> float:
+        return price * (1 - self.stop_pct)
+
+    def exit_reason(self, pos: dict, i: int) -> str | None:
+        t = pos["ticker"]
+        if self.ratio[t].iloc[i] < self.floor:
+            return "최고가 대비 15% 하락"
+        if self.week_end[i] and t not in self._ranked(i).index[: self.keep_rank]:
+            return "순위 하락"
+        return None
+
+
+# Candidates in the current report. Pullback and breakout lost to buying the
+# S&P 500 in the first round (PR #1) and are kept only for reference.
+ALL = [MomentumSwing, MomentumBearExitVol, EarningsGap, HighProximity]

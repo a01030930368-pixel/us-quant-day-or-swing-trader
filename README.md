@@ -9,14 +9,14 @@
 
 | 경로 | 내용 |
 |---|---|
-| `swing/data.py` | 야후 파이낸스 일봉(시가·고가·저가·종가) 다운로드 (캐시) |
+| `swing/data.py` | 야후 파이낸스 일봉(시가·고가·저가·종가·거래량) 다운로드 (캐시) |
 | `swing/indicators.py` | 이동평균, RSI, ATR |
-| `swing/strategies.py` | 스윙 후보 전략: 눌림목 매수, 신고가 돌파, 주간 모멘텀 |
+| `swing/strategies.py` | 스윙 후보 전략: 주간 모멘텀, 실적 갭 상승 추종, 52주 신고가 근접 (1차에서 탈락한 눌림목·신고가 돌파도 참고용으로 보관) |
 | `swing/engine.py` | 거래 단위 백테스트 (다음 날 시가 체결, 장중 손절, 거래비용, 미래 데이터 사용 방지) |
-| `swing/universe.py` | 매매 대상 미국 대형주 약 100개 |
+| `swing/universe.py` | 매매 대상 종목 목록: 대형주 약 100개, 중형주 약 130개 |
 | `swing/metrics.py` | 수익률·최대낙폭·샤프 계산 (us-quant-trader에서 가져옴) |
 | `swing/brokers.py` | 가짜 계좌(SimBroker)와 키움 REST 연결 (us-quant-trader에서 가져옴, 모의매매 단계에서 사용) |
-| `scripts/run_backtest.py` | 모든 후보를 백테스트하고 `reports/swing_report.md` 생성 |
+| `scripts/run_backtest.py` | 모든 후보를 백테스트하고 `reports/swing_report_<universe>.md` 생성 (`--universe large` 대형주, `all` 대형주+중형주) |
 
 ## 실행 방법
 

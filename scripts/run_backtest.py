@@ -1,7 +1,7 @@
-"""Backtest every swing candidate and write reports/swing_report.md.
+"""Backtest every swing candidate and write reports/swing_report_<universe>.md.
 
     python scripts/run_backtest.py
-    python scripts/run_backtest.py --start 2010-01-01 --split 2018-01-01 --cost-bps 20
+    python scripts/run_backtest.py --universe all --start 2010-01-01 --split 2018-01-01 --cost-bps 20
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from swing import engine, metrics  # noqa: E402
 from swing.data import load_ohlc  # noqa: E402
 from swing.strategies import ALL  # noqa: E402
-from swing.universe import LARGE_CAPS, MARKET  # noqa: E402
+from swing.universe import MARKET, UNIVERSES  # noqa: E402
 
 
 def stats(ret: pd.Series, trades: pd.DataFrame | None = None,
@@ -75,11 +75,13 @@ def main() -> None:
     ap.add_argument("--start", default="2010-01-01", help="백테스트 시작일")
     ap.add_argument("--split", default="2018-01-01", help="검증(OOS) 구간 시작일")
     ap.add_argument("--cost-bps", type=float, default=20.0, help="편도 거래비용 (bp)")
+    ap.add_argument("--universe", default="large", choices=sorted(UNIVERSES),
+                    help="large: 대형주, all: 대형주 + 중형주")
     ap.add_argument("--out", default="reports")
     args = ap.parse_args()
 
     warmup = str(pd.Timestamp(args.start).year - 1) + "-01-01"   # 200-day averages need a year
-    data = load_ohlc(LARGE_CAPS + [MARKET], start=warmup)
+    data = load_ohlc(UNIVERSES[args.universe] + [MARKET], start=warmup)
     split = pd.Timestamp(args.split)
     universe = [t for t in data["Close"].columns if t != MARKET]
 
@@ -114,14 +116,15 @@ def main() -> None:
 
     end = spy.index[-1].date()
     lines = [
-        "# 미국주식 스윙 후보 전략 백테스트",
+        f"# 미국주식 스윙 후보 전략 백테스트 ({'대형주' if args.universe == 'large' else '대형주 + 중형주'})",
         "",
         f"- 기간: {args.start} ~ {end} (학습 구간 {args.start} ~ {split.date()}, "
         f"**검증 구간 {split.date()} ~ {end}**)",
-        f"- 종목: 미국 대형주 {len(universe)}개 (`swing/universe.py`), 동시 보유 최대 5종목, 종목당 계좌의 20%",
+        f"- 종목: {'미국 대형주' if args.universe == 'large' else '미국 대형주 + 중형주'} {len(universe)}개 "
+        "(`swing/universe.py`), 동시 보유 최대 5종목, 종목당 계좌의 20%",
         f"- 거래비용: 사고팔 때 각각 {args.cost_bps:.0f}bp ({args.cost_bps / 100:.2f}%)",
         "- 신호는 종가로 판단하고 다음 날 시가에 사고팝니다. 손절은 장중 저가로 확인합니다.",
-        "- 세 전략 모두 S&P500이 200일 평균 아래면 새로 사지 않습니다(하락장 필터).",
+        "- 모든 전략은 S&P500이 200일 평균 아래면 새로 사지 않습니다(하락장 필터).",
         "- 파라미터는 널리 알려진 기본값 그대로이고, 이 데이터에 맞춰 조정하지 않았습니다.",
         "",
         "## 전략 설명",
@@ -176,9 +179,9 @@ def main() -> None:
     ]
     out = Path(args.out)
     out.mkdir(exist_ok=True)
-    (out / "swing_report.md").write_text("\n".join(lines), encoding="utf-8")
+    (out / f"swing_report_{args.universe}.md").write_text("\n".join(lines), encoding="utf-8")
     for label, (strat, res) in results.items():
-        res.trades.to_csv(out / f"trades_{strat.name}.csv", index=False)
+        res.trades.to_csv(out / f"trades_{args.universe}_{strat.name}.csv", index=False)
     print("\n".join(lines))
 
 

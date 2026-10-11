@@ -18,7 +18,8 @@ def make_ohlc(n_days: int = 700, tickers=("AAA", "BBB", "CCC", "DDD", "EEE", "SP
     open_ = close.shift(1).fillna(close.iloc[0]) * (1 + gap)
     high = np.maximum(open_, close) * (1 + rng.uniform(0, 0.01, size=close.shape))
     low = np.minimum(open_, close) * (1 - rng.uniform(0, 0.01, size=close.shape))
-    return {"Open": open_, "High": high, "Low": low, "Close": close}
+    volume = pd.DataFrame(rng.lognormal(13, 0.5, size=close.shape), index=idx, columns=close.columns)
+    return {"Open": open_, "High": high, "Low": low, "Close": close, "Volume": volume}
 
 
 @pytest.fixture

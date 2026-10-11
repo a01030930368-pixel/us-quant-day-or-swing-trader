@@ -28,7 +28,8 @@ class BuyFirstDay(Strategy):
 def flat_data(n=10):
     idx = pd.bdate_range("2020-01-01", periods=n)
     c = pd.DataFrame({"AAA": np.linspace(100, 109, n), "SPY": 100.0}, index=idx)
-    return {"Open": c.copy(), "High": c + 0.5, "Low": c - 0.5, "Close": c}
+    return {"Open": c.copy(), "High": c + 0.5, "Low": c - 0.5, "Close": c,
+            "Volume": c * 0 + 1e6}
 
 
 def test_buys_next_open_and_pays_costs():
@@ -102,3 +103,18 @@ def test_vol_weight_capped():
     for i in range(30, 300, 37):
         for t in s.tradable:
             assert 0 < s.weight(t, i) <= 0.2 + 1e-12
+
+
+def test_earnings_gap_signal():
+    from swing.strategies import EarningsGap
+    d = make_ohlc(seed=4)
+    t, k = "AAA", 400
+    prev = d["Close"][t].iloc[k - 1]
+    d["Open"].iloc[k, 0] = prev * 1.08          # 8% gap up
+    d["Close"].iloc[k, 0] = prev * 1.10         # holds the gain
+    d["High"].iloc[k, 0] = prev * 1.11
+    d["Low"].iloc[k, 0] = prev * 1.07
+    d["Volume"].iloc[k, 0] = d["Volume"][t].iloc[k - 60:k].mean() * 10
+    s = EarningsGap().prepare(d)
+    assert bool(s.signal[t].iloc[k])
+    assert s.initial_stop(t, k + 1, prev * 1.1) == prev * 1.07

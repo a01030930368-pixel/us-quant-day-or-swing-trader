@@ -1,4 +1,4 @@
-"""Daily OHLC prices from Yahoo Finance (split/dividend adjusted), cached as CSV.
+"""Daily OHLC prices and volume from Yahoo Finance (split/dividend adjusted), cached as CSV.
 
 Adapted from us-quant-trader's quant/data.py: swing trading needs open, high
 and low as well as close, because entries fill at the next open and stops are
@@ -12,12 +12,12 @@ from pathlib import Path
 import pandas as pd
 
 CACHE_DIR = Path("data_cache")
-FIELDS = ("Open", "High", "Low", "Close")
+FIELDS = ("Open", "High", "Low", "Close", "Volume")
 
 
 def load_ohlc(tickers: list[str], start: str, end: str | None = None,
               use_cache: bool = True) -> dict[str, pd.DataFrame]:
-    """Return {"Open"|"High"|"Low"|"Close": frame(index=date, columns=tickers)}.
+    """Return {"Open"|"High"|"Low"|"Close"|"Volume": frame(index=date, columns=tickers)}.
 
     Tickers that return no data are dropped (with a printed warning) instead of
     failing the whole run, since a 100-stock universe always has a straggler.
