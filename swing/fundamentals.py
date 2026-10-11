@@ -43,14 +43,18 @@ KEEP_TAGS = EPS_TAGS + SALES_TAGS + GROSS_TAGS + COGS_TAGS + ASSET_TAGS
 def _get(url: str) -> dict:
     import requests
 
-    for attempt in range(4):
-        r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
+    for attempt in range(5):
+        try:
+            r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
+        except (requests.ConnectionError, requests.Timeout):
+            time.sleep(2 ** attempt)                   # the SEC server sometimes stalls: try again
+            continue
         if r.status_code == 200:
             return r.json()
         if r.status_code == 404:
             return {}
         time.sleep(2 ** attempt)
-    r.raise_for_status()
+    print(f"SEC 데이터를 받지 못해 건너뜁니다: {url}")
     return {}
 
 
@@ -144,8 +148,8 @@ def _slim(facts: dict) -> dict:
     return {"facts": {"us-gaap": {k: gaap[k] for k in KEEP_TAGS if k in gaap}}}
 
 
-def load_facts(tickers: list[str], use_cache: bool = True) -> dict[str, dict]:
-    """companyfacts JSON per ticker ({} when the SEC has none), cached on disk."""
+def cik_of(use_cache: bool = True):
+    """Function mapping a ticker to its SEC company number (CIK), or None."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cik_path = CACHE_DIR / "company_tickers.json"
     if use_cache and cik_path.exists():
@@ -154,9 +158,15 @@ def load_facts(tickers: list[str], use_cache: bool = True) -> dict[str, dict]:
         table = _get(TICKERS_URL)
         cik_path.write_text(json.dumps(table))
     cik = {row["ticker"].upper(): int(row["cik_str"]) for row in table.values()}
+    return lambda t: cik.get(t.upper().replace("-", ".")) or cik.get(t.upper().replace("-", ""))
+
+
+def load_facts(tickers: list[str], use_cache: bool = True) -> dict[str, dict]:
+    """companyfacts JSON per ticker ({} when the SEC has none), cached on disk."""
+    cik = cik_of(use_cache)
     out = {}
     for t in tickers:
-        c = cik.get(t.upper().replace("-", ".")) or cik.get(t.upper().replace("-", ""))
+        c = cik(t)
         if c is None:
             out[t] = {}
             continue
