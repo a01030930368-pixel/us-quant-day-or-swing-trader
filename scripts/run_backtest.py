@@ -19,18 +19,18 @@ from swing.data import load_ohlc  # noqa: E402
 from swing.legends import LEGENDS  # noqa: E402
 from swing.legends2 import LEGENDS2  # noqa: E402
 from swing.refine import REFINED  # noqa: E402
-from swing.earnings_legends import EARNINGS, EPS_MIN, SALES_MIN  # noqa: E402
+from swing.earnings_legends import EARNINGS, EPS_MIN, SALES_MIN, WIDE  # noqa: E402
 from swing.fundamentals import growth_flags, load_facts  # noqa: E402
 from swing.strategies import ALL, MomentumSwing  # noqa: E402
 
 TITLES = {"legends": "전설 1그룹 규칙", "legends2": "전설 2그룹 규칙", "round2": "후보 전략",
           "refine": "와인스타인·다바스 다듬기", "legends_all": "전설 1·2그룹 규칙",
-          "earnings": "전설 규칙 + 실적 조건"}
+          "earnings": "전설 규칙 + 실적 조건", "earnings_wide": "오닐·미너비니 + 실적 조건"}
 SETS = {"legends": LEGENDS, "legends2": LEGENDS2, "round2": ALL, "refine": REFINED,
-        "legends_all": LEGENDS + LEGENDS2, "earnings": EARNINGS}
+        "legends_all": LEGENDS + LEGENDS2, "earnings": EARNINGS, "earnings_wide": WIDE}
 RULE_CHAPTERS = {"legends": "12장", "legends2": "14장", "refine": "12·14장",
-                 "legends_all": "12·14장", "earnings": "12·14·17장"}
-from swing.universe import MARKET, UNIVERSE_LABELS, UNIVERSES  # noqa: E402
+                 "legends_all": "12·14장", "earnings": "12·14·17장", "earnings_wide": "12·14·17장"}
+from swing.universe import MARKET, UNIVERSE_LABELS, tickers  # noqa: E402
 
 
 def stats(ret: pd.Series, trades: pd.DataFrame | None = None,
@@ -108,20 +108,20 @@ def main() -> None:
     ap.add_argument("--start", default="2010-01-01", help="백테스트 시작일")
     ap.add_argument("--split", default="2018-01-01", help="검증(OOS) 구간 시작일")
     ap.add_argument("--cost-bps", type=float, default=20.0, help="편도 거래비용 (bp)")
-    ap.add_argument("--universe", default="large", choices=sorted(UNIVERSES),
-                    help="large: 대형주, all: 대형주 + 중형주, small: 소형주, every: 전부")
+    ap.add_argument("--universe", default="large", choices=sorted(UNIVERSE_LABELS),
+                    help="large: 대형주, all: 대형주 + 중형주, small: 소형주, every: 전부, sp1500: S&P 1500")
     ap.add_argument("--set", default="legends", choices=sorted(SETS),
-                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교")
+                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교, earnings_wide: 오닐·미너비니 + 실적(넓은 종목용)")
     ap.add_argument("--out", default="reports")
     args = ap.parse_args()
 
     warmup = str(pd.Timestamp(args.start).year - 1) + "-01-01"   # 200-day averages need a year
-    data = load_ohlc(UNIVERSES[args.universe] + [MARKET], start=warmup)
+    data = load_ohlc(tickers(args.universe) + [MARKET], start=warmup)
     split = pd.Timestamp(args.split)
     universe = [t for t in data["Close"].columns if t != MARKET]
 
     earn_lines = []
-    if args.set == "earnings":
+    if args.set in ("earnings", "earnings_wide"):
         flags, cover = growth_flags(load_facts(universe), data["Close"].index, EPS_MIN, SALES_MIN)
         if cover["eps"] == 0:
             raise RuntimeError("SEC 실적 데이터를 하나도 받지 못했습니다. 접속이 막혔는지 확인하세요.")

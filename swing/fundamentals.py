@@ -134,6 +134,12 @@ def daily_flags(growth: pd.DataFrame, index: pd.DatetimeIndex, minimum: float,
     return (val >= minimum) & fresh
 
 
+def _slim(facts: dict) -> dict:
+    """Keep only the EPS and sales tags (a full file can be several MB)."""
+    gaap = facts.get("facts", {}).get("us-gaap", {})
+    return {"facts": {"us-gaap": {k: gaap[k] for k in EPS_TAGS + SALES_TAGS if k in gaap}}}
+
+
 def load_facts(tickers: list[str], use_cache: bool = True) -> dict[str, dict]:
     """companyfacts JSON per ticker ({} when the SEC has none), cached on disk."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -154,7 +160,7 @@ def load_facts(tickers: list[str], use_cache: bool = True) -> dict[str, dict]:
         if use_cache and path.exists():
             out[t] = json.loads(path.read_text())
             continue
-        out[t] = _get(FACTS_URL.format(cik=c))
+        out[t] = _slim(_get(FACTS_URL.format(cik=c)))
         path.write_text(json.dumps(out[t]))
         time.sleep(0.12)                     # SEC limit: at most 10 requests a second
     return out

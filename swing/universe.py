@@ -5,6 +5,10 @@ shrank or disappeared since 2010 (survivorship bias). Results look somewhat
 better than a real investor would have seen; treat them as an upper bound.
 """
 
+from pathlib import Path
+
+MARKET = "SPY"
+
 LARGE_CAPS = [
     "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "TSLA", "BRK-B", "JPM", "JNJ",
     "V", "UNH", "HD", "PG", "MA", "BAC", "XOM", "CVX", "ABBV", "KO",
@@ -65,6 +69,42 @@ SMALL_CAPS = [
 UNIVERSES = {"large": LARGE_CAPS, "all": LARGE_CAPS + MID_CAPS,
              "small": SMALL_CAPS, "every": LARGE_CAPS + MID_CAPS + SMALL_CAPS}
 UNIVERSE_LABELS = {"large": "미국 대형주", "all": "미국 대형주 + 중형주",
-                   "small": "미국 소형주", "every": "미국 대형주 + 중형주 + 소형주"}
+                   "small": "미국 소형주", "every": "미국 대형주 + 중형주 + 소형주",
+                   "sp1500": "미국 S&P 1500 (대형 500 + 중형 400 + 소형 600)"}
 
-MARKET = "SPY"
+SP1500_PAGES = [f"https://en.wikipedia.org/wiki/List_of_S%26P_{n}_companies" for n in (500, 400, 600)]
+
+
+def sp1500(cache: Path = Path("data_cache") / "sp1500.txt") -> list[str]:
+    """Today's S&P 500 + 400 + 600 members from Wikipedia, cached on disk.
+
+    Today's members only: companies dropped from the indexes since 2010 are
+    missing (survivorship bias, results look better than reality).
+    """
+    if cache.exists():
+        return cache.read_text().split()
+    from io import StringIO
+
+    import pandas as pd
+    import requests
+
+    out: list[str] = []
+    for url in SP1500_PAGES:
+        html = requests.get(url, headers={"User-Agent": "us-quant-day-or-swing-trader backtest"},
+                            timeout=30).text
+        for table in pd.read_html(StringIO(html)):
+            col = next((c for c in table.columns if str(c).strip() in ("Symbol", "Ticker symbol", "Ticker")), None)
+            if col is not None and len(table) > 300:
+                out += [str(t).strip().replace(".", "-") for t in table[col].dropna()]
+                break
+        else:
+            raise RuntimeError(f"종목 표를 찾지 못했습니다: {url}")
+    out = list(dict.fromkeys(t for t in out if t and t != MARKET))
+    cache.parent.mkdir(exist_ok=True)
+    cache.write_text("\n".join(out))
+    return out
+
+
+def tickers(universe: str) -> list[str]:
+    return sp1500() if universe == "sp1500" else UNIVERSES[universe]
+

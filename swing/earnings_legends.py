@@ -47,3 +47,6 @@ def gated(cls):
 
 BASES = [Minervini, ONeil, Weinstein, Darvas, WeinsteinDarvas]
 EARNINGS = [c for base in BASES for c in (base, gated(base))]
+
+# For the S&P 1500 run: the two earnings traders, plus the best rule set so far for reference.
+WIDE = [ONeil, gated(ONeil), Minervini, gated(Minervini), WeinsteinDarvas]
