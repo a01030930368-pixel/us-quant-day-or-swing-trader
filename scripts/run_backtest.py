@@ -21,15 +21,17 @@ from swing.legends2 import LEGENDS2  # noqa: E402
 from swing.refine import REFINED  # noqa: E402
 from swing.earnings_legends import EARNINGS, EPS_MIN, SALES_MIN, WIDE  # noqa: E402
 from swing.fundamentals import growth_flags, load_facts  # noqa: E402
+from swing.pead import HOLD_DAYS, PEAD_SET, SUE_MIN, sue_table  # noqa: E402
 from swing.strategies import ALL, MomentumSwing  # noqa: E402
 
 TITLES = {"legends": "전설 1그룹 규칙", "legends2": "전설 2그룹 규칙", "round2": "후보 전략",
           "refine": "와인스타인·다바스 다듬기", "legends_all": "전설 1·2그룹 규칙",
-          "earnings": "전설 규칙 + 실적 조건", "earnings_wide": "오닐·미너비니 + 실적 조건"}
+          "earnings": "전설 규칙 + 실적 조건", "earnings_wide": "오닐·미너비니 + 실적 조건",
+          "pead": "실적 서프라이즈 후 추세(PEAD)"}
 SETS = {"legends": LEGENDS, "legends2": LEGENDS2, "round2": ALL, "refine": REFINED,
-        "legends_all": LEGENDS + LEGENDS2, "earnings": EARNINGS, "earnings_wide": WIDE}
+        "legends_all": LEGENDS + LEGENDS2, "earnings": EARNINGS, "earnings_wide": WIDE, "pead": PEAD_SET}
 RULE_CHAPTERS = {"legends": "12장", "legends2": "14장", "refine": "12·14장",
-                 "legends_all": "12·14장", "earnings": "12·14·17장", "earnings_wide": "12·14·17장"}
+                 "legends_all": "12·14장", "earnings": "12·14·17장", "earnings_wide": "12·14·17장", "pead": "19장"}
 from swing.universe import MARKET, UNIVERSE_LABELS, tickers  # noqa: E402
 
 
@@ -111,7 +113,7 @@ def main() -> None:
     ap.add_argument("--universe", default="large", choices=sorted(UNIVERSE_LABELS),
                     help="large: 대형주, all: 대형주 + 중형주, small: 소형주, every: 전부, sp1500: S&P 1500")
     ap.add_argument("--set", default="legends", choices=sorted(SETS),
-                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교, earnings_wide: 오닐·미너비니 + 실적(넓은 종목용)")
+                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교, earnings_wide: 오닐·미너비니 + 실적(넓은 종목용), pead: 실적 서프라이즈 후 추세")
     ap.add_argument("--out", default="reports")
     args = ap.parse_args()
 
@@ -132,6 +134,20 @@ def main() -> None:
             f"매출은 {cover['sales']}개 종목에서 받았습니다(은행 등 매출 항목이 다른 회사는 빠짐). "
             "공시한 다음 날부터만 씁니다.",
             f"- 실적 조건을 통과한 종목 수: 하루 평균 {flags[since].sum(axis=1).mean():.0f}개",
+        ]
+    if args.set == "pead":
+        sue, covered = sue_table(load_facts(universe), data["Close"].index)
+        if covered == 0:
+            raise RuntimeError("SEC 실적 데이터를 하나도 받지 못했습니다. 접속이 막혔는지 확인하세요.")
+        data["SUE"] = sue
+        since = sue.index >= pd.Timestamp(args.start)
+        per_year = (sue[since] >= SUE_MIN).sum().sum() / (since.sum() / 252)
+        earn_lines = [
+            f"- 실적 데이터: 미국 증권거래위원회(SEC) 공시. {len(universe)}개 중 {covered}개 종목에서 "
+            "실적 서프라이즈(SUE)를 계산했습니다. 공시한 다음 날 종가에 판단하고 그다음 날 시가에 삽니다.",
+            f"- 서프라이즈 {SUE_MIN:.0f} 이상 신호: 1년에 평균 {per_year:.0f}번 (전체 공시 중 "
+            f"{(sue[since] >= SUE_MIN).sum().sum() / max(sue[since].notna().sum().sum(), 1) * 100:.0f}%)",
+            f"- 보유 기간은 {HOLD_DAYS}거래일(약 3개월)로 고정입니다.",
         ]
     spy = data["Close"][MARKET]
     spy_ret = spy[spy.index >= pd.Timestamp(args.start)].pct_change().fillna(0.0)

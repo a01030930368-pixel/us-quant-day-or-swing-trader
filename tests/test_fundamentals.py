@@ -73,3 +73,33 @@ def test_earnings_sets_no_lookahead_and_gate(cls):
     pd.testing.assert_series_equal(r1.equity.iloc[:k + 1], e2.iloc[:k + 1])
     if cls.name.endswith("_earn"):
         assert "AAA" not in set(r1.trades["ticker"])
+
+
+def test_sue_uses_only_past_changes():
+    from swing.pead import sue_events
+    ends = pd.date_range("2015-03-31", periods=16, freq="QE")
+    vals = [1.0, 1.0, 1.0, 1.0] + [1.0 + 0.1 * (k % 2) for k in range(11)] + [3.0]
+    q = pd.DataFrame({"end": ends, "filed": ends + pd.Timedelta(days=40), "val": vals})
+    ev = sue_events(q).set_index("end")["sue"]
+    assert ev.iloc[:8].isna().all()                  # needs 4 past year-over-year changes
+    assert ev.iloc[-1] > 10                          # a jump far beyond the usual change
+
+
+@pytest.mark.parametrize("cls", __import__("swing.pead", fromlist=["PEAD_SET"]).PEAD_SET)
+def test_pead_no_lookahead_and_holds_60_days(cls):
+    d1 = make_ohlc(n_days=1100, seed=3, drift=0.0012)
+    sue = pd.DataFrame(np.nan, index=d1["Close"].index, columns=d1["Close"].columns)
+    sue.iloc[300::70, 0] = 3.0
+    sue.iloc[320::70, 1] = 1.0                       # below the threshold: never bought
+    d1["SUE"] = sue
+    d2 = {f: v.copy() for f, v in d1.items()}
+    k = 800
+    for f in ("Open", "High", "Low", "Close", "Volume"):
+        d2[f].iloc[k + 1:] *= 1.5
+    r1 = engine.run(cls().prepare(d1), cost_bps=20)
+    e2 = engine.run(cls().prepare(d2), cost_bps=20).equity
+    pd.testing.assert_series_equal(r1.equity.iloc[:k + 1], e2.iloc[:k + 1])
+    names = d1["Close"].columns
+    assert names[1] not in set(r1.trades["ticker"])
+    if cls.name == "pead":
+        assert len(r1.trades) and (r1.trades.query("reason != '손절'")["days"] == 61).all()   # open to open: 60 days, counted inclusive
