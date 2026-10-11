@@ -22,10 +22,11 @@ from swing.refine import REFINED  # noqa: E402
 from swing.earnings_legends import EARNINGS, EPS_MIN, SALES_MIN, WIDE  # noqa: E402
 from swing.fundamentals import growth_flags, load_facts  # noqa: E402
 from swing.reversion import REVERSION  # noqa: E402
-from swing.quality import QUALITY, profitability_table  # noqa: E402
+from swing.quality import QUALITY, GrossProfitability, profitability_table  # noqa: E402
 from swing.announce import ANNOUNCE, announcement_tables, load_announcements  # noqa: E402
-from swing.insider import EVENT_MIN, INSIDER, load_purchases, purchase_table  # noqa: E402
-from swing.pead import HOLD_DAYS, PEAD_SET, SUE_MIN, sue_table  # noqa: E402
+from swing.insider import EVENT_MIN, INSIDER, InsiderDollar, load_purchases, purchase_table  # noqa: E402
+from swing.blend import blend  # noqa: E402
+from swing.pead import HOLD_DAYS, PEAD, PEAD_SET, SUE_MIN, sue_table  # noqa: E402
 from swing.strategies import ALL, MomentumSwing  # noqa: E402
 
 TITLES = {"legends": "전설 1그룹 규칙", "legends2": "전설 2그룹 규칙", "round2": "후보 전략",
@@ -35,11 +36,13 @@ TITLES = {"legends": "전설 1그룹 규칙", "legends2": "전설 2그룹 규칙
           "reversion": "단기 과매도 반등",
           "quality": "총이익률(품질) 장기 보유",
           "announce": "실적 발표일 기준 서프라이즈",
-          "insider": "내부자 매수 따라가기"}
+          "insider": "내부자 매수 따라가기",
+          "blend": "여러 전략 합치기"}
 SETS = {"legends": LEGENDS, "legends2": LEGENDS2, "round2": ALL, "refine": REFINED,
-        "legends_all": LEGENDS + LEGENDS2, "earnings": EARNINGS, "earnings_wide": WIDE, "pead": PEAD_SET, "reversion": REVERSION, "quality": QUALITY, "announce": ANNOUNCE, "insider": INSIDER}
+        "legends_all": LEGENDS + LEGENDS2, "earnings": EARNINGS, "earnings_wide": WIDE, "pead": PEAD_SET, "reversion": REVERSION, "quality": QUALITY, "announce": ANNOUNCE, "insider": INSIDER,
+        "blend": [GrossProfitability, PEAD, InsiderDollar, MomentumSwing]}
 RULE_CHAPTERS = {"legends": "12장", "legends2": "14장", "refine": "12·14장",
-                 "legends_all": "12·14장", "earnings": "12·14·17장", "earnings_wide": "12·14·17장", "pead": "19장", "reversion": "20장", "quality": "19·22장", "announce": "19·23장", "insider": "24장"}
+                 "legends_all": "12·14장", "earnings": "12·14·17장", "earnings_wide": "12·14·17장", "pead": "19장", "reversion": "20장", "quality": "19·22장", "announce": "19·23장", "insider": "24장", "blend": "19·22·24·25장"}
 from swing.universe import MARKET, UNIVERSE_LABELS, tickers  # noqa: E402
 
 
@@ -74,7 +77,7 @@ PCT = {"평균 비중", "연수익률", "월평균(복리)", "최대낙폭", "�
 
 
 def table(rows: dict[str, dict]) -> str:
-    cols = list(next(iter(rows.values())).keys())
+    cols = list(max(rows.values(), key=len).keys())          # mixes have no trade columns
     out = ["| 전략 | " + " | ".join(cols) + " |", "|---" * (len(cols) + 1) + "|"]
     for name, r in rows.items():
         cells = []
@@ -121,7 +124,7 @@ def main() -> None:
     ap.add_argument("--universe", default="large", choices=sorted(UNIVERSE_LABELS),
                     help="large: 대형주, all: 대형주 + 중형주, small: 소형주, every: 전부, sp1500: S&P 1500")
     ap.add_argument("--set", default="legends", choices=sorted(SETS),
-                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교, earnings_wide: 오닐·미너비니 + 실적(넓은 종목용), pead: 실적 서프라이즈 후 추세, reversion: 단기 과매도 반등, quality: 총이익률 장기 보유, announce: 실적 발표일 기준 서프라이즈, insider: 내부자 매수 따라가기")
+                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교, earnings_wide: 오닐·미너비니 + 실적(넓은 종목용), pead: 실적 서프라이즈 후 추세, reversion: 단기 과매도 반등, quality: 총이익률 장기 보유, announce: 실적 발표일 기준 서프라이즈, insider: 내부자 매수 따라가기, blend: 여러 전략 합치기")
     ap.add_argument("--low-cost-bps", type=float, default=None,
                     help="이 비용(편도 bp)으로도 다시 계산해 표를 덧붙임 (예: 키움 이벤트 수수료 7)")
     ap.add_argument("--out", default="reports")
@@ -157,6 +160,20 @@ def main() -> None:
             f"- 실적 데이터: 미국 증권거래위원회(SEC) 공시. {len(universe)}개 중 {gcovered}개 종목에서 "
             "총이익률을 계산했습니다(은행·보험처럼 매출원가가 없는 회사는 빠짐). 공시 다음 날부터 씁니다.",
             f"- 하루 평균 {gpa[since].notna().sum(axis=1).mean():.0f}개 종목의 총이익률을 알 수 있었습니다.",
+        ]
+    if args.set == "blend":
+        idx = data["Close"].index
+        facts = load_facts(universe)
+        data["GPA"], gcovered = profitability_table(facts, idx)
+        data["SUE"], scovered = sue_table(facts, idx)
+        data["IBUY"] = purchase_table(load_purchases(idx[0].year, idx[-1]), idx, universe)
+        if gcovered == 0 or scovered == 0 or data["IBUY"].to_numpy().sum() == 0:
+            raise RuntimeError("SEC 데이터를 받지 못했습니다. 접속이 막혔는지 확인하세요.")
+        earn_lines = [
+            f"- SEC 공시: 총이익률 {gcovered}개, 실적 서프라이즈 {scovered}개, "
+            f"내부자 매수 {int((data['IBUY'] > 0).any().sum())}개 종목.",
+            "- 각 전략은 자기 장의 규칙 그대로 계좌의 정해진 몫에서 돌고, 매달 초 목표 비중으로 다시 맞춥니다. "
+            "옮기는 돈에도 사고팔 때 거래비용을 매깁니다.",
         ]
     if args.set == "insider":
         idx = data["Close"].index
@@ -211,8 +228,22 @@ def main() -> None:
         strat = cls().prepare(data, market=MARKET)
         results[strat.label] = (strat, engine.run(strat, cost_bps=args.cost_bps, start=args.start))
 
+    mixes = {}
+    if args.set == "blend":
+        parts = list(results)
+        mixes = {"혼합 3종 (총이익률·실적 서프라이즈·내부자, 1/3씩)": {k: 1.0 for k in parts[:3]},
+                 "혼합 4종 (위 3종 + 주간 모멘텀, 1/4씩)": {k: 1.0 for k in parts}}
+
+    def mixed(runs: dict, cost: float) -> dict[str, pd.Series]:
+        rets = {k: v.returns[v.returns.index >= pd.Timestamp(args.start)] for k, v in runs.items()}
+        return {name: blend({k: rets[k] for k in w}, w, cost) for name, w in mixes.items()}
+
+    mix_ret = mixed({k: v[1] for k, v in results.items()}, args.cost_bps)
+
     def period(mask_fn) -> dict[str, dict]:
         rows = {}
+        for name, r in mix_ret.items():
+            rows[name] = stats(r[mask_fn(r.index)])
         for label, (_, res) in results.items():
             m = mask_fn(res.returns.index)
             tr = res.trades
@@ -226,12 +257,14 @@ def main() -> None:
     oos = period(lambda ix: ix >= split)
 
     # Cost sensitivity: same strategies at double the trading cost.
-    dbl = {}
+    dbl, dbl_runs = {}, {}
     for label, (strat, _) in results.items():
-        r = engine.run(strat, cost_bps=args.cost_bps * 2, start=args.start)
+        r = dbl_runs[label] = engine.run(strat, cost_bps=args.cost_bps * 2, start=args.start)
         m = r.returns.index >= split
         tr = r.trades[pd.to_datetime(r.trades["entry_date"]) >= split] if len(r.trades) else r.trades
         dbl[label] = stats(r.returns[m], tr, r.exposure[m])
+    dbl = {**{name: stats(r[r.index >= split]) for name, r in mixed(dbl_runs, args.cost_bps * 2).items()},
+           **dbl}
 
     # Optional: the same strategies at a lower cost (e.g. a discounted commission, limit orders).
     low_lines = []
@@ -266,7 +299,7 @@ def main() -> None:
 
     mom = engine.run(MomentumSwing().prepare(data, market=MARKET), cost_bps=args.cost_bps,
                      start=args.start).returns
-    corr = correlations({k: v[1].returns for k, v in results.items()},
+    corr = correlations({**mix_ret, **{k: v[1].returns for k, v in results.items()}},
                         {"S&P500": spy_ret, "주간 모멘텀(이 앱)": mom}, split)
 
     end = spy.index[-1].date()
@@ -291,6 +324,8 @@ def main() -> None:
         "## 전략 설명",
         "",
     ]
+    for name in mixes:
+        lines.append(f"- **{name}**: 아래 전략들을 한 계좌에 나눠 담고 매달 초 같은 비중으로 다시 맞춥니다.")
     for label, (strat, _) in results.items():
         lines.append(f"- **{label}**: {strat.description}")
     lines += [
@@ -325,7 +360,7 @@ def main() -> None:
         "",
         "## 연도별 수익률",
         "",
-        yearly({**{k: v[1].returns[v[1].returns.index >= pd.Timestamp(args.start)]
+        yearly({**mix_ret, **{k: v[1].returns[v[1].returns.index >= pd.Timestamp(args.start)]
                    for k, v in results.items()}, "S&P500": spy_ret}),
         "",
         "## 매도 이유",
