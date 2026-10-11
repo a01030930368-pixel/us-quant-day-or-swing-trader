@@ -17,11 +17,12 @@
 | `swing/refine.py` | 와인스타인·다바스 다듬기: 와인스타인 5종목 집중, 두 전략을 한 계좌에서 함께 운용 |
 | `swing/fundamentals.py` | 미국 증권거래위원회(SEC) 무료 공시에서 분기 EPS·매출을 받아, 공시 다음 날부터만 쓰는 실적 성장 표시 |
 | `swing/earnings_legends.py` | 미너비니·오닐·와인스타인·다바스에 오닐식 실적 조건(분기 EPS·매출 +25%)을 붙인 버전 |
+| `swing/pead.py` | 실적 서프라이즈 후 추세(PEAD): 분기 EPS가 평소보다 크게 늘면 공시 다음 날 사서 60거래일 보유 |
 | `swing/engine.py` | 거래 단위 백테스트 (다음 날 시가 체결, 장중 손절, 거래비용, 미래 데이터 사용 방지) |
 | `swing/universe.py` | 매매 대상 종목 목록: 대형주 약 100개, 중형주 약 130개, 소형주 약 160개 |
 | `swing/metrics.py` | 수익률·최대낙폭·샤프 계산 (us-quant-trader에서 가져옴) |
 | `swing/brokers.py` | 가짜 계좌(SimBroker)와 키움 REST 연결 (us-quant-trader에서 가져옴, 모의매매 단계에서 사용) |
-| `scripts/run_backtest.py` | 전략을 백테스트하고 `reports/swing_report_*.md` 생성 (`--universe large` 대형주, `all` 대형주+중형주, `small` 소형주, `every` 전부, `sp1500` S&P 1500 전체(위키백과에서 목록 받음); `--set legends` 1그룹, `legends2` 2그룹, `legends_all` 1·2그룹, `refine` 와인스타인·다바스 다듬기, `earnings` 실적 조건 비교, `earnings_wide` 오닐·미너비니 + 실적(넓은 종목용), `round2` 1·2차 후보) |
+| `scripts/run_backtest.py` | 전략을 백테스트하고 `reports/swing_report_*.md` 생성 (`--universe large` 대형주, `all` 대형주+중형주, `small` 소형주, `every` 전부, `sp1500` S&P 1500 전체(위키백과에서 목록 받음); `--set legends` 1그룹, `legends2` 2그룹, `legends_all` 1·2그룹, `refine` 와인스타인·다바스 다듬기, `earnings` 실적 조건 비교, `earnings_wide` 오닐·미너비니 + 실적(넓은 종목용), `pead` 실적 서프라이즈 후 추세, `round2` 1·2차 후보) |
 
 ## 실행 방법
 
