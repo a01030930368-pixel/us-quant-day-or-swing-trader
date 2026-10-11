@@ -272,25 +272,28 @@ class HighProximity(Strategy):
 
     George & Hwang (2004): investors anchor on the 52-week high and hesitate to
     buy near it, so stocks close to it tend to keep rising. Hold the 5 stocks
-    with the highest close / 52-week-high ratio (above their 200-day average);
-    sell when the ratio drops below 0.85, the stock falls out of the top 15, or
-    at a 10% stop loss.
+    with the highest close / 52-week-high ratio (above their 200-day average),
+    ties broken by 6-month return; sell when the ratio drops below 0.85 or at a
+    10% stop loss. (Many stocks sit exactly at their high, so selling on a
+    rank drop just churned the ties and paid costs for nothing.)
     """
     name = "high52"
     label = "52주 신고가 근접"
-    description = ("매주 금요일, 52주 최고가에 가장 가까운 종목 5개를 보유합니다. 최고가 대비 "
-                   "15% 넘게 밀리거나 순위가 15위 밖이면 팔고, 손절 -10%.")
+    description = ("매주 금요일, 52주 최고가에 가장 가까운 종목을 빈자리만큼 삽니다(동률이면 6개월 "
+                   "수익률 순). 최고가 대비 15% 넘게 밀리면 팔고, 손절 -10%.")
     stop_pct = 0.10
-    keep_rank = 15
     floor = 0.85
 
     def _prepare(self) -> None:
         self.ratio = self.c / self.c.rolling(252, min_periods=252).max()
+        self.mom126 = self.c / self.c.shift(126) - 1
         self.week_end = MomentumSwing._week_ends(self.c.index)
 
     def _ranked(self, i: int) -> pd.Series:
         ok = self.c.iloc[i] > self.sma200.iloc[i]
-        return self.ratio.iloc[i][ok].reindex(self.tradable).dropna().sort_values(ascending=False)
+        frame = pd.DataFrame({"ratio": self.ratio.iloc[i].round(3), "mom": self.mom126.iloc[i]})
+        frame = frame[ok].reindex(self.tradable).dropna()
+        return frame.sort_values(["ratio", "mom"], ascending=False)["ratio"]
 
     def candidates(self, i: int) -> list[str]:
         if not self.week_end[i] or not self.market_ok.iloc[i]:
@@ -304,8 +307,6 @@ class HighProximity(Strategy):
         t = pos["ticker"]
         if self.ratio[t].iloc[i] < self.floor:
             return "최고가 대비 15% 하락"
-        if self.week_end[i] and t not in self._ranked(i).index[: self.keep_rank]:
-            return "순위 하락"
         return None
 
 
