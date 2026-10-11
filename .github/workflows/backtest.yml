@@ -14,7 +14,7 @@ on:
         default: "2018-01-01"
       cost_bps:
         description: "편도 거래비용 (bp)"
-        default: "20"
+        default: "25"
 jobs:
   backtest:
     runs-on: ubuntu-latest
@@ -27,37 +27,41 @@ jobs:
       - name: 대형주
         run: >
           python scripts/run_backtest.py --universe large --start ${{ inputs.start || '2010-01-01' }}
-          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '25' }}
       - name: 대형주 + 중형주
         run: >
           python scripts/run_backtest.py --universe all --start ${{ inputs.start || '2010-01-01' }}
-          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '25' }}
       - name: 전설 2그룹 (대형주 + 중형주)
         run: >
           python scripts/run_backtest.py --set legends2 --universe all --start ${{ inputs.start || '2010-01-01' }}
-          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '25' }}
       - name: 와인스타인·다바스 다듬기 (대형주 + 중형주)
         run: >
           python scripts/run_backtest.py --set refine --universe all --start ${{ inputs.start || '2010-01-01' }}
-          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '25' }}
       - name: 전설 1·2그룹 (소형주)
         run: >
           python scripts/run_backtest.py --set legends_all --universe small --start ${{ inputs.start || '2010-01-01' }}
-          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '25' }}
       - name: 전설 규칙 + 실적 조건 (대형주 + 중형주)
         run: >
           python scripts/run_backtest.py --set earnings --universe all --start ${{ inputs.start || '2010-01-01' }}
-          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '25' }}
       - name: 오닐·미너비니 + 실적 조건 (S&P 1500)
         run: >
           python scripts/run_backtest.py --set earnings_wide --universe sp1500 --start ${{ inputs.start || '2010-01-01' }}
-          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '25' }}
       - name: 실적 서프라이즈 후 추세 PEAD (S&P 1500)
         run: >
           python scripts/run_backtest.py --set pead --universe sp1500 --start ${{ inputs.start || '2010-01-01' }}
-          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '20' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '25' }}
+      - name: 단기 과매도 반등 (S&P 1500)
+        run: >
+          python scripts/run_backtest.py --set reversion --universe sp1500 --start ${{ inputs.start || '2010-01-01' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '25' }}
       - run: >
-          cat reports/swing_report_pead_sp1500.md reports/swing_report_large.md reports/swing_report_all.md
+          cat reports/swing_report_reversion_sp1500.md reports/swing_report_pead_sp1500.md reports/swing_report_large.md reports/swing_report_all.md
           reports/swing_report_legends2_all.md reports/swing_report_refine_all.md
           reports/swing_report_legends_all_small.md reports/swing_report_earnings_all.md
           reports/swing_report_earnings_wide_sp1500.md >> "$GITHUB_STEP_SUMMARY"
