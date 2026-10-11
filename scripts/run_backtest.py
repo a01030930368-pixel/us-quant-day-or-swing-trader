@@ -207,9 +207,9 @@ def main() -> None:
         if len(res.trades):
             tr = res.trades.assign(contrib=res.trades["return"] * res.trades["weight"]
                                    * res.trades["part"])
-            g = tr.groupby("reason").agg(n=("return", "size"), mean=("return", "mean"),
+            g = tr.groupby("reason").agg(n=("return", "size"), avg=("return", "mean"),
                                          contrib=("contrib", "sum"))
-            parts = [f"{r} {int(x.n)}회(평균 {x.mean * 100:+.1f}%, 계좌 기여 합계 {x.contrib * 100:+.0f}%p)"
+            parts = [f"{r} {int(x.n)}회(평균 {x.avg * 100:+.1f}%, 계좌 기여 합계 {x.contrib * 100:+.0f}%p)"
                      for r, x in g.iterrows()]
             lines.append(f"- **{label}**: " + ", ".join(parts))
     lines += [
