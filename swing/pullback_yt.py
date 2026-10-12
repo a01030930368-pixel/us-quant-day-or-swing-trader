@@ -59,7 +59,8 @@ def _pivot_confirmed(x: pd.DataFrame, highs: bool) -> pd.DataFrame:
     return piv.shift(PIVOT)
 
 
-def pullback_setups(o, h, l, c, v, method: str = "B", rank: str = "volume") -> dict[str, pd.DataFrame]:
+def pullback_setups(o, h, l, c, v, method: str = "B", rank: str = "volume", body: float = BODY_MIN,
+                    vol_mult: float = VOL_MULT, base_days: int = BASE_DAYS) -> dict[str, pd.DataFrame]:
     """Signal days with their support, range bottom and first-rise high.
 
     method "B": the second dip after a bounce off the support (buy next open).
@@ -68,11 +69,11 @@ def pullback_setups(o, h, l, c, v, method: str = "B", rank: str = "volume") -> d
     rank "volume": breakout volume / 50-day average; "rest": long, shallow rests first.
     Returns frames rank (NaN on non-signal days), support, floor, peak.
     """
-    support = c.rolling(BASE_DAYS, min_periods=BASE_DAYS).max().shift(1)
-    floor = l.rolling(BASE_DAYS, min_periods=BASE_DAYS).min().shift(1)
-    top = h.rolling(BASE_DAYS, min_periods=BASE_DAYS).max().shift(1)
+    support = c.rolling(base_days, min_periods=base_days).max().shift(1)
+    floor = l.rolling(base_days, min_periods=base_days).min().shift(1)
+    top = h.rolling(base_days, min_periods=base_days).max().shift(1)
     avg50 = v.rolling(50, min_periods=50).mean().shift(1)
-    breakout = ((c > support) & ((c - o) / o >= BODY_MIN) & (v >= VOL_MULT * avg50)
+    breakout = ((c > support) & ((c - o) / o >= body) & (v >= vol_mult * avg50)
                 & ((top - floor) / floor <= BASE_WIDTH))
     rising = pd.DataFrame(True, index=c.index, columns=c.columns)
     for n in (20, 60, 120):
@@ -150,11 +151,13 @@ class PullbackP1(Strategy):
     wide = False
     target = "2R"
     rank_by = "volume"
+    body, vol_mult, base_days = BODY_MIN, VOL_MULT, BASE_DAYS
 
     def _prepare(self) -> None:
         cols = self.tradable
         s = pullback_setups(*(x[cols] for x in (self.o, self.h, self.l, self.c, self.v)),
-                            method=self.method, rank=self.rank_by)
+                            method=self.method, rank=self.rank_by, body=self.body,
+                            vol_mult=self.vol_mult, base_days=self.base_days)
         self.rank, self.sup, self.flo, self.pk = s["rank"], s["support"], s["floor"], s["peak"]
         self.info: dict[str, tuple[float, float, float]] = {}
         self.trade: dict[str, dict] = {}
@@ -249,4 +252,15 @@ class PullbackP5(PullbackP1):
     rank_by = "rest"
 
 
-PULLBACK_YT = [PullbackP1, PullbackP2, PullbackP3, PullbackP4, PullbackP5]
+def _sweep(param: str, value, text: str) -> type:
+    """P1 with one breakout number changed: the rulebook's sensitivity check."""
+    tag = str(value).replace(".", "")
+    return type(f"PullbackP1_{param}_{tag}", (PullbackP1,), {
+        "name": f"pullback_p1_{param}_{tag}", "label": f"P1 민감도: {text}",
+        "description": f"P1과 같고 {text}만 바꿉니다.", param: value})
+
+
+SWEEP = [_sweep("body", 0.03, "기준봉 몸통 3%"), _sweep("body", 0.06, "기준봉 몸통 6%"),
+         _sweep("vol_mult", 1.5, "거래량 1.5배"), _sweep("vol_mult", 3.0, "거래량 3배"),
+         _sweep("base_days", 20, "박스 20일"), _sweep("base_days", 60, "박스 60일")]
+PULLBACK_YT = [PullbackP1, PullbackP2, PullbackP3, PullbackP4, PullbackP5, *SWEEP]

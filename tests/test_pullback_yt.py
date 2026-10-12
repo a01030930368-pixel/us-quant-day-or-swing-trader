@@ -9,7 +9,7 @@ from conftest import make_ohlc
 TICKERS = tuple(f"T{i}" for i in range(40)) + ("SPY",)
 
 
-@pytest.mark.parametrize("cls", PULLBACK_YT)
+@pytest.mark.parametrize("cls", PULLBACK_YT[:5])
 def test_no_lookahead(cls):
     d1 = make_ohlc(n_days=1500, tickers=TICKERS, seed=7, drift=0.0006)
     d2 = {f: v.copy() for f, v in d1.items()}
