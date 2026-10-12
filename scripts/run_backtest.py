@@ -393,6 +393,13 @@ def main() -> None:
     (out / f"swing_report_{suffix}.md").write_text("\n".join(lines), encoding="utf-8")
     for label, (strat, res) in results.items():
         res.trades.to_csv(out / f"trades_{suffix}_{strat.name}.csv", index=False)
+    if mix_ret:
+        # Daily returns of each mix and S&P500, to combine with other apps' strategies.
+        daily = pd.DataFrame({**mix_ret, "S&P500": spy_ret})
+        daily.to_csv(out / f"daily_returns_{suffix}.csv", float_format="%.6f")
+        print("MONTHLY_RETURNS_CSV_BEGIN")
+        print(((1 + daily).resample("ME").prod() - 1).to_csv(float_format="%.6f"))
+        print("MONTHLY_RETURNS_CSV_END")
     print("\n".join(lines))
 
 

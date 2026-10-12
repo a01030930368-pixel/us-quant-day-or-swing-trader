@@ -1,0 +1,22 @@
+# 여러 전략 합치기(S&P 1500)만 돌리고, 혼합 전략의 일별 수익률을 CSV로 남깁니다.
+# 다른 앱(ETF 퀀트 앱)의 전략과 섞어 보는 시험용입니다.
+name: blend-export
+on:
+  push:
+    branches: [claude/blend-export]
+  workflow_dispatch:
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: 여러 전략 합치기 (S&P 1500)
+        run: python scripts/run_backtest.py --set blend --universe sp1500 --start 2010-01-01 --split 2018-01-01 --cost-bps 25
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blend-daily
+          path: reports/daily_returns_*.csv
