@@ -27,6 +27,7 @@ from swing.announce import ANNOUNCE, announcement_tables, load_announcements  # 
 from swing.insider import EVENT_MIN, INSIDER, InsiderDollar, load_purchases, purchase_table  # noqa: E402
 from swing.blend import blend  # noqa: E402
 from swing.sewer import SEWER  # noqa: E402
+from swing.pullback_yt import PULLBACK_YT  # noqa: E402
 from swing.pead import HOLD_DAYS, PEAD, PEAD_SET, SUE_MIN, sue_table  # noqa: E402
 from swing.strategies import ALL, MomentumSwing  # noqa: E402
 
@@ -39,12 +40,13 @@ TITLES = {"legends": "전설 1그룹 규칙", "legends2": "전설 2그룹 규칙
           "announce": "실적 발표일 기준 서프라이즈",
           "insider": "내부자 매수 따라가기",
           "sewer": "하수구 돌파 (200일선 두 번째 돌파)",
+          "pullback_yt": "유튜브 눌림목 매매 (규칙서 01)",
           "blend": "여러 전략 합치기"}
 SETS = {"legends": LEGENDS, "legends2": LEGENDS2, "round2": ALL, "refine": REFINED,
-        "legends_all": LEGENDS + LEGENDS2, "earnings": EARNINGS, "earnings_wide": WIDE, "pead": PEAD_SET, "reversion": REVERSION, "quality": QUALITY, "announce": ANNOUNCE, "insider": INSIDER, "sewer": SEWER,
+        "legends_all": LEGENDS + LEGENDS2, "earnings": EARNINGS, "earnings_wide": WIDE, "pead": PEAD_SET, "reversion": REVERSION, "quality": QUALITY, "announce": ANNOUNCE, "insider": INSIDER, "sewer": SEWER, "pullback_yt": PULLBACK_YT,
         "blend": [GrossProfitability, PEAD, InsiderDollar, MomentumSwing]}
 RULE_CHAPTERS = {"legends": "12장", "legends2": "14장", "refine": "12·14장",
-                 "legends_all": "12·14장", "earnings": "12·14·17장", "earnings_wide": "12·14·17장", "pead": "19장", "reversion": "20장", "quality": "19·22장", "announce": "19·23장", "insider": "24장", "blend": "19·22·24·25장", "sewer": "26장"}
+                 "legends_all": "12·14장", "earnings": "12·14·17장", "earnings_wide": "12·14·17장", "pead": "19장", "reversion": "20장", "quality": "19·22장", "announce": "19·23장", "insider": "24장", "blend": "19·22·24·25장", "sewer": "26장", "pullback_yt": "27장"}
 from swing.universe import MARKET, UNIVERSE_LABELS, tickers  # noqa: E402
 
 
@@ -126,7 +128,7 @@ def main() -> None:
     ap.add_argument("--universe", default="large", choices=sorted(UNIVERSE_LABELS),
                     help="large: 대형주, all: 대형주 + 중형주, small: 소형주, every: 전부, sp1500: S&P 1500")
     ap.add_argument("--set", default="legends", choices=sorted(SETS),
-                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교, earnings_wide: 오닐·미너비니 + 실적(넓은 종목용), pead: 실적 서프라이즈 후 추세, reversion: 단기 과매도 반등, quality: 총이익률 장기 보유, announce: 실적 발표일 기준 서프라이즈, insider: 내부자 매수 따라가기, blend: 여러 전략 합치기, sewer: 하수구 돌파(200일선 두 번째 돌파)")
+                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교, earnings_wide: 오닐·미너비니 + 실적(넓은 종목용), pead: 실적 서프라이즈 후 추세, reversion: 단기 과매도 반등, quality: 총이익률 장기 보유, announce: 실적 발표일 기준 서프라이즈, insider: 내부자 매수 따라가기, blend: 여러 전략 합치기, sewer: 하수구 돌파(200일선 두 번째 돌파), pullback_yt: 유튜브 눌림목 매매(규칙서 01)")
     ap.add_argument("--low-cost-bps", type=float, default=None,
                     help="이 비용(편도 bp)으로도 다시 계산해 표를 덧붙임 (예: 키움 이벤트 수수료 7)")
     ap.add_argument("--out", default="reports")
@@ -377,7 +379,7 @@ def main() -> None:
             parts = [f"{r} {int(x.n)}회(평균 {x.avg * 100:+.1f}%, 계좌 기여 합계 {x.contrib * 100:+.0f}%p)"
                      for r, x in g.iterrows()]
             lines.append(f"- **{label}**: " + ", ".join(parts))
-    if args.set == "sewer":
+    if args.set in ("sewer", "pullback_yt"):
         # The deep-drop rule picks stocks that crashed and came back; list who made the money
         # so we can check how many only joined today's index after recovering.
         lines += ["", "## 계좌 기여가 가장 큰 거래 15건", ""]
