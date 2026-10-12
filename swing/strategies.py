@@ -78,6 +78,10 @@ class Strategy:
         """Why to sell at the next open, or (reason, share to sell) for a partial sale."""
         return None
 
+    def add_weight(self, pos: dict, i: int) -> float | None:
+        """Share of the account to add to an open position at the next open (pyramiding), or None."""
+        return None
+
 
 class Pullback(Strategy):
     """Buy a short, sharp dip in a stock that is in a long uptrend; sell on the bounce.

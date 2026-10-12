@@ -13,7 +13,9 @@ Timeline for each trading day i, which keeps the strategy from seeing the future
            reaches it, or at the open on a gap above it. Stops are checked
            first, the cautious assumption when both happen on one day.
 3. Close:  value the account, move trailing stops, and decide tomorrow's
-           sells and buys from today's close.
+           sells, buys and adds to winners (pyramiding) from today's close.
+           An add is bought at the next open and the position's entry price
+           becomes the average cost.
 
 Every buy and sell pays `cost_bps` (commission + slippage + FX spread).
 Shares are fractional to keep the math simple; with whole shares a small
@@ -52,6 +54,7 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
     positions: dict[str, dict] = {}
     pending_sells: dict[str, tuple[str, float]] = {}
     pending_buys: list[str] = []
+    pending_adds: dict[str, float] = {}
     trades: list[dict] = []
     equity, exposure = [], []
     last_close = c.ffill()
@@ -82,6 +85,22 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
                 px = o[t].iloc[i]
                 close_trade(t, i, px if pd.notna(px) else last_close[t].iloc[i], reason, frac)
         pending_sells.clear()
+        for t, w in pending_adds.items():
+            px = o[t].iloc[i]
+            if t not in positions or pd.isna(px) or px <= 0:
+                continue
+            spend = min(prev_equity * w, cash / (1 + cost))
+            if spend <= 0:
+                continue
+            pos = positions[t]
+            shares = spend / px
+            pos["entry_price"] = (pos["entry_price"] * pos["shares"] + spend) / (pos["shares"] + shares)
+            pos["shares"] += shares
+            pos["initial_shares"] += shares
+            pos["weight"] += spend / prev_equity
+            pos["adds"] = pos.get("adds", 0) + 1
+            cash -= spend * (1 + cost)
+        pending_adds = {}
         for t in pending_buys:
             px = o[t].iloc[i]
             if len(positions) >= n_max or t in positions or pd.isna(px) or px <= 0:
@@ -141,6 +160,10 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
             reason = strategy.exit_reason(pos, i)
             if reason:
                 pending_sells[t] = reason if isinstance(reason, tuple) else (reason, 1.0)
+            else:
+                add = strategy.add_weight(pos, i)
+                if add:
+                    pending_adds[t] = add
         full_sells = sum(1 for _, frac in pending_sells.values() if frac >= 1)
         free = n_max - (len(positions) - full_sells)
         if free > 0:
