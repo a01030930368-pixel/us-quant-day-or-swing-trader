@@ -1,0 +1,14 @@
+name: video-subs
+on:
+  push:
+    branches: [claude/video-subs]
+jobs:
+  subs:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pip install -q yt-dlp
+      - run: |
+          yt-dlp --skip-download --write-auto-subs --write-subs --sub-langs "ko.*,ko" --sub-format "vtt/best" -o "v" "https://www.youtube.com/watch?v=y-tKhbA2RKU" || true
+          ls -la
+          yt-dlp --skip-download --print description "https://www.youtube.com/watch?v=y-tKhbA2RKU" || true
+          for f in *.vtt; do echo "=== $f"; grep -v -E '^(WEBVTT|Kind:|Language:|[0-9:.]+ -->|\s*$)' "$f" | sed 's/<[^>]*>//g' | awk '!seen[$0]++'; done
