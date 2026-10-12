@@ -377,6 +377,21 @@ def main() -> None:
             parts = [f"{r} {int(x.n)}회(평균 {x.avg * 100:+.1f}%, 계좌 기여 합계 {x.contrib * 100:+.0f}%p)"
                      for r, x in g.iterrows()]
             lines.append(f"- **{label}**: " + ", ".join(parts))
+    if args.set == "sewer":
+        # The deep-drop rule picks stocks that crashed and came back; list who made the money
+        # so we can check how many only joined today's index after recovering.
+        lines += ["", "## 계좌 기여가 가장 큰 거래 15건", ""]
+        for label, (_, res) in results.items():
+            if not len(res.trades):
+                continue
+            tr = res.trades.assign(contrib=res.trades["return"] * res.trades["weight"]
+                                   * res.trades["part"]).sort_values("contrib", ascending=False)
+            share = tr["contrib"].head(10).sum() / tr["contrib"].sum() if tr["contrib"].sum() > 0 else float("nan")
+            lines += [f"**{label}** (상위 10건이 계좌 기여 합계의 {share * 100:.0f}%)", "",
+                      "| 종목 | 매수일 | 매도일 | 수익률 | 계좌 기여 |", "|---|---|---|---|---|"]
+            lines += [f"| {x.ticker} | {x.entry_date} | {x.exit_date} | {x['return'] * 100:+.0f}% | "
+                      f"{x.contrib * 100:+.1f}%p |" for _, x in tr.head(15).iterrows()]
+            lines.append("")
     lines += [
         "",
         "## 주의",
