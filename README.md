@@ -20,6 +20,7 @@
 | `swing/quality.py` | 총이익률(매출총이익 ÷ 총자산) 상위 회사를 몇 달씩 보유하는 장기 전략 3가지 |
 | `swing/announce.py` | SEC 실적 발표 공시(8-K) 날짜 기준 실적 서프라이즈와 발표 반응 전략 3가지 |
 | `swing/insider.py` | SEC 내부자 거래 데이터(Form 4)로 임원·이사의 장내 매수를 따라가는 전략 3가지 |
+| `swing/ptj.py` | 유튜브 '폴 튜더 존스식 변곡점 돌파 + 5일선 추격매수' 규칙서 02의 시험 목록 J1~J5 (나눠 사기 포함) |
 | `swing/pullback_yt.py` | 유튜브 '눌림목 매매'(진짜 트레이딩) 규칙서 01의 시험 목록 P1~P5 |
 | `swing/sewer.py` | 유튜브 '하수구 돌파' 매매법: 오래 200일선 아래 있던 종목이 첫 돌파 실패 후 더 큰 거래량으로 다시 돌파할 때 사는 전략 3가지 |
 | `swing/blend.py` | 여러 전략을 한 계좌에 나눠 담고 매달 비중을 다시 맞추는 혼합 계산 |
@@ -29,7 +30,7 @@
 | `swing/universe.py` | 매매 대상 종목 목록: 대형주 약 100개, 중형주 약 130개, 소형주 약 160개 |
 | `swing/metrics.py` | 수익률·최대낙폭·샤프 계산 (us-quant-trader에서 가져옴) |
 | `swing/brokers.py` | 가짜 계좌(SimBroker)와 키움 REST 연결 (us-quant-trader에서 가져옴, 모의매매 단계에서 사용) |
-| `scripts/run_backtest.py` | 전략을 백테스트하고 `reports/swing_report_*.md` 생성 (`--universe large` 대형주, `all` 대형주+중형주, `small` 소형주, `every` 전부, `sp1500` S&P 1500 전체(위키백과에서 목록 받음); `--set legends` 1그룹, `legends2` 2그룹, `legends_all` 1·2그룹, `refine` 와인스타인·다바스 다듬기, `earnings` 실적 조건 비교, `earnings_wide` 오닐·미너비니 + 실적(넓은 종목용), `pead` 실적 서프라이즈 후 추세, `reversion` 단기 과매도 반등, `quality` 총이익률 장기 보유, `announce` 실적 발표일 기준 서프라이즈, `insider` 내부자 매수 따라가기, `blend` 여러 전략 합치기, `sewer` 하수구 돌파(200일선 두 번째 돌파), `pullback_yt` 유튜브 눌림목 매매(규칙서 01), `round2` 1·2차 후보) |
+| `scripts/run_backtest.py` | 전략을 백테스트하고 `reports/swing_report_*.md` 생성 (`--universe large` 대형주, `all` 대형주+중형주, `small` 소형주, `every` 전부, `sp1500` S&P 1500 전체(위키백과에서 목록 받음); `--set legends` 1그룹, `legends2` 2그룹, `legends_all` 1·2그룹, `refine` 와인스타인·다바스 다듬기, `earnings` 실적 조건 비교, `earnings_wide` 오닐·미너비니 + 실적(넓은 종목용), `pead` 실적 서프라이즈 후 추세, `reversion` 단기 과매도 반등, `quality` 총이익률 장기 보유, `announce` 실적 발표일 기준 서프라이즈, `insider` 내부자 매수 따라가기, `blend` 여러 전략 합치기, `sewer` 하수구 돌파(200일선 두 번째 돌파), `pullback_yt` 유튜브 눌림목 매매(규칙서 01), `ptj` 유튜브 폴 튜더 존스식 변곡점 돌파(규칙서 02), `round2` 1·2차 후보) |
 
 ## 실행 방법
 
