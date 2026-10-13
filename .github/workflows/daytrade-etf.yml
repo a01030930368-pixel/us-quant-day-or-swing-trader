@@ -1,0 +1,95 @@
+# 데이트레이딩 규칙서 b21~b23 (3배 ETF 크래블 돌파·휴장 전날·월말월초)와 b25 (주말 비트코인 → 월요일 관련주)
+# (무료 1분봉 mito0o852/OHLCV-1m, 1993-01 ~ 2026-03).
+# 1) prep: 해마다 정해진 ETF·코인 관련주의 1분봉만 뽑아 캐시에 남긴다.
+# 1-2) btc: 바이낸스 비트코인 1분봉 (안 되면 코인베이스 1시간봉, 둘 다 안 되면 b25는 GBTC로 대신).
+# 2) backtest: 규칙서마다 따로 계산한다. 결과는 Summary와 첨부파일(bNN-report)에 남는다.
+name: daytrade-etf
+on:
+  push:
+    branches: [claude/daytrade-b01-8wz04e]
+    paths: [daytrade/prep_etf.py, daytrade/etf.py, daytrade/btc_prices.py, scripts/run_etf.py, .github/workflows/daytrade-etf.yml]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q tests
+  prep:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        year: [1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009,
+               2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: prep_etf
+          key: etf-prep-${{ matrix.year }}-${{ hashFiles('daytrade/prep.py', 'daytrade/prep_etf.py') }}
+      - uses: actions/setup-python@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.12"
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: pip install -r requirements.txt
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: python daytrade/prep_etf.py --year ${{ matrix.year }} --out prep_etf
+      - run: ls -la prep_etf
+      - uses: actions/upload-artifact@v4
+        with:
+          name: etf-prep-${{ matrix.year }}
+          path: prep_etf
+          retention-days: 7
+  btc:
+    needs: test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python daytrade/btc_prices.py --out btc/btc.parquet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: etf-prep-btc
+          path: btc
+          retention-days: 7
+  backtest:
+    needs: [prep, btc]
+    if: ${{ !cancelled() && needs.prep.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        rule: [b21, b22, b23, b25]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: etf-prep-*
+          path: prep_etf
+          merge-multiple: true
+      - run: python scripts/run_etf.py --prep prep_etf --rule ${{ matrix.rule }} --out reports/${{ matrix.rule }}
+      - run: cat reports/${{ matrix.rule }}/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rule }}-report
+          path: reports/${{ matrix.rule }}
