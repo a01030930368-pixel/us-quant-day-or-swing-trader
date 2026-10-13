@@ -79,6 +79,37 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
                        "days": i - pos["entry_i"] + 1, "reason": reason, "part": part,
                        "weight": pos["weight"]})
 
+    def add_to(t: str, i: int, w) -> None:
+        """Add to an open position at day i's open, or at a limit price during the day.
+
+        `w` is a share of the account, or (share, limit) for a buy limit: filled
+        at the open if the stock opens at or below the limit, at the limit if
+        the low reaches it, else not at all (the order expires that day).
+        """
+        nonlocal cash
+        limit = None
+        if isinstance(w, tuple):
+            w, limit = w
+        px = o[t].iloc[i]
+        if t not in positions or pd.isna(px) or px <= 0:
+            return
+        if limit is not None:
+            if px > limit:
+                if pd.isna(l[t].iloc[i]) or l[t].iloc[i] > limit:
+                    return
+                px = limit
+        spend = min(prev_equity * w, cash / (1 + cost))
+        if spend <= 0:
+            return
+        pos = positions[t]
+        shares = spend / px
+        pos["entry_price"] = (pos["entry_price"] * pos["shares"] + spend) / (pos["shares"] + shares)
+        pos["shares"] += shares
+        pos["initial_shares"] += shares
+        pos["weight"] += spend / prev_equity
+        pos["adds"] = pos.get("adds", 0) + 1
+        cash -= spend * (1 + cost)
+
     prev_equity = 1.0
     for i in range(first, len(dates)):
         # 1. Open: sells first so their cash can fund today's buys.
@@ -88,20 +119,7 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
                 close_trade(t, i, px if pd.notna(px) else last_close[t].iloc[i], reason, frac)
         pending_sells.clear()
         for t, w in pending_adds.items():
-            px = o[t].iloc[i]
-            if t not in positions or pd.isna(px) or px <= 0:
-                continue
-            spend = min(prev_equity * w, cash / (1 + cost))
-            if spend <= 0:
-                continue
-            pos = positions[t]
-            shares = spend / px
-            pos["entry_price"] = (pos["entry_price"] * pos["shares"] + spend) / (pos["shares"] + shares)
-            pos["shares"] += shares
-            pos["initial_shares"] += shares
-            pos["weight"] += spend / prev_equity
-            pos["adds"] = pos.get("adds", 0) + 1
-            cash -= spend * (1 + cost)
+            add_to(t, i, w)
         pending_adds = {}
         for t in pending_buys:
             px = o[t].iloc[i]
@@ -119,6 +137,11 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
                             "weight": spend / prev_equity,
                             "stop": strategy.initial_stop(t, i, px)}
             cash -= spend * (1 + cost)
+            if getattr(strategy, "close_fill", False):
+                # Bought at yesterday's close, so an add order placed then works today too.
+                add = strategy.add_weight(positions[t], i - 1)
+                if add:
+                    add_to(t, i, add)
         pending_buys = []
 
         # A strategy that buys at the previous close already holds the stock at today's open.

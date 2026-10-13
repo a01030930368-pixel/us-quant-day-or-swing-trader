@@ -89,7 +89,10 @@ class Strategy:
         return None
 
     def add_weight(self, pos: dict, i: int) -> float | None:
-        """Share of the account to add to an open position at the next open (pyramiding), or None."""
+        """Share of the account to add to an open position at the next open (pyramiding), or None.
+
+        May also return (share, limit price): a buy limit for the next day only.
+        """
         return None
 
 
