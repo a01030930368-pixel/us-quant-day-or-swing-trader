@@ -167,7 +167,7 @@ def b11(day, line, target=True):
 def b12(day, pc, adv_sh, frac, up=0.10, line="vwap", cap2=True, target=True, t_hi=300):
     mi, o, h, l, c, v = day["mi"], day["o"], day["h"], day["l"], day["c"], day["v"]
     ref = vwap(day) if line == "vwap" else ema5_at_minute(day)[0]
-    start = int(np.searchsorted(mi, 15))
+    start = max(1, int(np.searchsorted(mi, 15)))  # 그 전 봉이 있어야 그날 고가를 잰다
     j0 = None
     for j in range(start, len(mi)):
         if np.isnan(ref[j]):
@@ -250,7 +250,7 @@ def b13(day, pc, adv_sh, frac, pole_min=0.05, flag_len=(2, 6), lo_px=1.0, t_hi=1
 def b14(day, line, use_stop=True):
     mi, o, h, l = day["mi"], day["o"], day["h"], day["l"]
     vw = vwap(day)
-    start = int(np.searchsorted(mi, 15))
+    start = max(1, int(np.searchsorted(mi, 15)))  # 그 전 봉이 있어야 손절 자리를 잰다
     for j in range(start, len(mi)):
         if mi[j] > 90:
             break
