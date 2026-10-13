@@ -17,6 +17,16 @@ def is_spac_like(ticker, day):
     return 9.8 <= o0 <= 10.2 and (day["h"].max() - day["l"].min()) / o0 < 0.02
 
 
+def bad_prints(day, k=3.0, w=7):
+    """자료 오류: 어느 1분봉의 시가·고가·저가·종가가 앞뒤 w분 종가 중앙값의 k배 위나 1/k 아래.
+    (99999.99 같은 자리채움 값, 한 봉만 튄 잘못된 체결. 진짜 급등은 여러 분에 걸쳐 오르므로 걸리지 않는다)"""
+    c = day["c"]
+    pad = np.pad(c, w, mode="edge")
+    med = np.median(np.lib.stride_tricks.sliding_window_view(pad, 2 * w + 1), axis=1)
+    px = np.vstack([day["o"], day["h"], day["l"], c])
+    return bool(((px > med * k) | (px < med / k)).any())
+
+
 def dv60(day):
     """첫 거래부터 60분 거래대금."""
     m = day["mi"] < day["mi"][0] + 60

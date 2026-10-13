@@ -82,7 +82,7 @@ def main():
     cand, gone = find_ipos(tick, bars, spy.index)
 
     rows, drop = [], {"직전 1년 안에 거래 있음 (재등장)": 0, "코드 변경으로 보임": 0, "스팩·유닛·워런트": 0,
-                      "첫 시가 5달러 미만": 0, "첫 1시간 거래대금 1,000만 달러 미만": 0, "15:00 이후 첫 거래": 0}
+                      "첫 시가 5달러 미만": 0, "자료 오류 (한 봉만 앞뒤보다 3배 넘게 튐)": 0, "첫 1시간 거래대금 1,000만 달러 미만": 0, "15:00 이후 첫 거래": 0}
     gone_by_day = {d: g for d, g in gone.groupby("last_d")}
     for r in cand.itertuples():
         day = days[(r.ticker, r.d)]
@@ -99,6 +99,9 @@ def main():
             continue
         if o0 < 5:
             drop["첫 시가 5달러 미만"] += 1
+            continue
+        if b08.bad_prints(day):
+            drop["자료 오류 (한 봉만 앞뒤보다 3배 넘게 튐)"] += 1
             continue
         dv = b08.dv60(day)
         if dv < 10e6:

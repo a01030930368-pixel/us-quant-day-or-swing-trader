@@ -222,6 +222,14 @@ def test_b08_ipo_first_day():
     assert b08.trade(dict(day, mi=mi + 200)) is None                # 15:00 넘어 첫 거래
     assert b08.is_spac_like("ABCDU", day) and b08.is_spac_like("AB.WS", day) and not b08.is_spac_like("ABNB", day)
     assert abs(b08.dv60(day) - (21 + 59 * 22) * 1e4) < 1e-6
+    assert not b08.bad_prints(day)
+    ramp = np.clip((np.arange(n) - 100) / 20, 0, 1)                 # 20분에 걸쳐 22 -> 70 (여러 분 이어진 급등은 오류 아님)
+    c3 = 22 + 48 * ramp
+    assert not b08.bad_prints(dict(day, o=c3, h=c3 * 1.01, l=c3 * 0.99, c=c3))
+    h4 = h.copy(); h4[50] = 99999.99                                 # 한 봉만 튄 값
+    assert b08.bad_prints(dict(day, h=h4))
+    c5 = c.copy(); c5[-1] = 0.04                                     # 마지막 봉만 잘못 찍힘
+    assert b08.bad_prints(dict(day, c=c5))
 
 
 def test_b09_crash_rebound():
