@@ -18,6 +18,7 @@ kept falling.
 """
 from __future__ import annotations
 
+import re
 from io import StringIO
 from pathlib import Path
 
@@ -50,18 +51,26 @@ def sp500_tables(cache: Path = Path("data_cache") / "sp500_pit.csv") -> tuple[li
     changes = None
     for t in tables:
         flat = [" ".join(str(x) for x in (c if isinstance(c, tuple) else (c,))).lower() for c in t.columns]
-        if any("added" in f for f in flat) and any("removed" in f for f in flat):
-            t = t.copy()
-            t.columns = flat
-            date_c = next(c for c in flat if "date" in c)
-            add_c = next(c for c in flat if "added" in c and ("ticker" in c or "symbol" in c))
-            rem_c = next(c for c in flat if "removed" in c and ("ticker" in c or "symbol" in c))
-            changes = pd.DataFrame({"date": pd.to_datetime(t[date_c], errors="coerce"),
-                                    "added": t[add_c].fillna("").map(lambda x: norm(x) if x else ""),
-                                    "removed": t[rem_c].fillna("").map(lambda x: norm(x) if x else "")})
-            break
+        head = " ".join(flat + [str(x).lower() for x in t.head(2).to_numpy().ravel()])
+        if not ("added" in head and "removed" in head and t.shape[1] >= 5):
+            continue
+        cols = {}
+        for key, words in (("date", ("date",)), ("added", ("added",)), ("removed", ("removed",))):
+            hits = [j for j, f in enumerate(flat) if any(w in f for w in words)]
+            tick = [j for j in hits if "ticker" in flat[j] or "symbol" in flat[j]]
+            cols[key] = (tick or hits or [None])[0]
+        body = t
+        if None in cols.values() or cols["added"] == cols["removed"]:
+            # header came in as data rows: Wikipedia's layout is date, added (ticker, name), removed (ticker, name), reason
+            cols = {"date": 0, "added": 1, "removed": 3}
+            body = t[pd.to_datetime(t.iloc[:, 0], errors="coerce").notna()]
+        changes = pd.DataFrame({"date": pd.to_datetime(body.iloc[:, cols["date"]], errors="coerce"),
+                                "added": body.iloc[:, cols["added"]].fillna("").map(lambda x: norm(x) if x else ""),
+                                "removed": body.iloc[:, cols["removed"]].fillna("").map(lambda x: norm(x) if x else "")})
+        break
     if changes is None:
-        raise RuntimeError("S&P 500 변경 표를 찾지 못했습니다")
+        shapes = [(t.shape, [str(c) for c in t.columns][:6]) for t in tables]
+        raise RuntimeError(f"S&P 500 변경 표를 찾지 못했습니다: {shapes}")
     changes = changes.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
     changes["added"] = changes["added"].replace("NAN", "")
     changes["removed"] = changes["removed"].replace("NAN", "")
@@ -69,6 +78,61 @@ def sp500_tables(cache: Path = Path("data_cache") / "sp500_pit.csv") -> tuple[li
     changes.to_csv(cache, index=False)
     cur_path.write_text("\n".join(current))
     return current, changes
+
+
+FJA = "https://api.github.com/repos/fja05680/sp500/contents/"
+
+
+def sp500_snapshots(cache: Path = Path("data_cache") / "sp500_snapshots.csv") -> pd.DataFrame:
+    """Daily S&P 500 member lists (date, tickers) from github.com/fja05680/sp500, a public data set
+    built from S&P change notices. Used first; Wikipedia's change table is the fallback."""
+    if cache.exists():
+        return pd.read_csv(cache, parse_dates=["date"])
+    import requests
+
+    files = requests.get(FJA, headers={"User-Agent": "us-quant-day-or-swing-trader backtest"}, timeout=30).json()
+    pick = sorted(f for f in files if f["name"].startswith("S&P 500 Historical Components")
+                  and f["name"].endswith(".csv"))
+    if not pick:
+        raise RuntimeError("fja05680/sp500 파일을 찾지 못했습니다")
+    raw = requests.get(pick[-1]["download_url"], timeout=60).text
+    df = pd.read_csv(StringIO(raw))
+    df.columns = [c.strip().lower() for c in df.columns]
+    df = df.rename(columns={df.columns[0]: "date", df.columns[1]: "tickers"})
+    df["date"] = pd.to_datetime(df["date"])
+    cache.parent.mkdir(exist_ok=True)
+    df[["date", "tickers"]].to_csv(cache, index=False)
+    print("S&P 500 snapshots:", pick[-1]["name"], len(df), "rows", df["date"].min().date(), "~", df["date"].max().date())
+    return df[["date", "tickers"]]
+
+
+def snapshot_members(dates: pd.DatetimeIndex, snaps: pd.DataFrame) -> pd.DataFrame:
+    """Membership from dated member lists: each day uses the latest list on or before it."""
+    snaps = snaps.sort_values("date")
+    lists = [{norm(re.sub(r"-\d{6}$", "", x)) for x in str(t).split(",") if x.strip()} for t in snaps["tickers"]]
+    names = sorted(set().union(*lists))
+    col = {t: j for j, t in enumerate(names)}
+    out = np.zeros((len(dates), len(names)), bool)
+    starts = [int(dates.searchsorted(d)) for d in snaps["date"]] + [len(dates)]
+    for j, members in enumerate(lists):
+        a, b = starts[j], starts[j + 1]
+        if j == 0:
+            a = 0                                            # before the first list: use it
+        if b > a:
+            out[a:b, [col[t] for t in members]] = True
+    return pd.DataFrame(out, index=dates, columns=names)
+
+
+def snapshot_exits(snaps: pd.DataFrame) -> dict[str, pd.Timestamp]:
+    """Ticker -> the date of the first list it is missing from after its last appearance."""
+    snaps = snaps.sort_values("date").reset_index(drop=True)
+    last: dict[str, int] = {}
+    for j, t in enumerate(snaps["tickers"]):
+        for x in str(t).split(","):
+            if x.strip():
+                last[norm(re.sub(r"-\d{6}$", "", x))] = j
+    end = len(snaps) - 1
+    return {t: snaps["date"][j + 1] for t, j in last.items() if j < end}
 
 
 def membership(dates: pd.DatetimeIndex, current: list[str], changes: pd.DataFrame) -> pd.DataFrame:

@@ -34,3 +34,14 @@ def test_reused_ticker_is_cut(tmp_path):
     wide, info = load_daily([tmp_path / "daily_2020.parquet"], {"OLD", "SPY"}, {"OLD": d[10]})
     assert info["cut"] == 1
     assert wide["Close"]["OLD"].dropna().max() == 10.0
+
+
+def test_snapshot_members():
+    from swing.pit import snapshot_members
+    dates = pd.bdate_range("2020-01-01", periods=6)
+    snaps = pd.DataFrame({"date": [pd.Timestamp("2019-12-01"), dates[3]],
+                          "tickers": ["AAA,BRK.B,OLD-202001", "AAA,BRK.B,NEW"]})
+    m = snapshot_members(dates, snaps)
+    assert m["OLD"].tolist() == [True] * 3 + [False] * 3
+    assert m["NEW"].tolist() == [False] * 3 + [True] * 3
+    assert m["BRKB"].all()

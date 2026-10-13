@@ -17,7 +17,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from swing import engine, metrics  # noqa: E402
-from swing.pit import load_daily, membership, sp500_tables  # noqa: E402
+from swing.pit import (load_daily, membership, norm, snapshot_exits, snapshot_members,  # noqa: E402
+                       sp500_snapshots, sp500_tables)
 from swing.split7 import E1, E5, F1, F4, F8  # noqa: E402
 
 START = "2018-01-02"
@@ -42,16 +43,32 @@ def main() -> None:
     ap.add_argument("--cost-bps", type=float, default=30)
     a = ap.parse_args()
     paths = sorted(Path(a.daily).rglob("daily_*.parquet"))
-    current, changes = sp500_tables()
-    names = set(current) | set(changes["added"]) | set(changes["removed"]) - {""}
     probe = pd.read_parquet(paths[0], columns=["d"])
     first_day = pd.to_datetime(probe["d"]).min()
-    rem = changes[(changes["date"] >= first_day) & (changes["removed"] != "")]
-    left = dict(zip(rem["removed"], rem["date"]))
+    try:                                     # dated member lists (github.com/fja05680/sp500)
+        snaps = sp500_snapshots()
+        names = set(snapshot_members(pd.DatetimeIndex([first_day]), snaps).columns)
+        names |= {norm(x) for x in str(snaps.sort_values("date")["tickers"].iloc[-1]).split(",")}
+        left = {t: d for t, d in snapshot_exits(snaps).items() if d >= first_day}
+        names |= set(left)
+        source = (f"github.com/fja05680/sp500의 날짜별 구성 종목 목록 ({len(snaps)}개 날짜, "
+                  f"{snaps['date'].min().date()} ~ {snaps['date'].max().date()}, 마지막 목록 뒤는 그대로 이어 씀)")
+    except Exception as e:                   # fall back to Wikipedia's change table
+        print("snapshot list failed, using Wikipedia:", e)
+        snaps = None
+        current, changes = sp500_tables()
+        names = set(current) | set(changes["added"]) | set(changes["removed"]) - {""}
+        rem = changes[(changes["date"] >= first_day) & (changes["removed"] != "")]
+        left = dict(zip(rem["removed"], rem["date"]))
+        source = f"위키백과 S&P 500 현재 목록 + 변경 표({len(changes)}건)를 거꾸로 적용"
     wide, info = load_daily(paths, names | {"SPY"}, left)
     dates = wide["Close"].index
-    pit = membership(dates, current, changes).reindex(columns=wide["Close"].columns, fill_value=False)
-    pit = pit.drop(columns=["SPY"], errors="ignore")
+    if snaps is not None:
+        pit = snapshot_members(dates, snaps)
+        current = [t for t in pit.columns if pit[t].iloc[-1]]
+    else:
+        pit = membership(dates, current, changes)
+    pit = pit.reindex(columns=wide["Close"].columns, fill_value=False).drop(columns=["SPY"], errors="ignore")
     now = pd.DataFrame(False, index=dates, columns=pit.columns)
     now.loc[:, [t for t in current if t in now.columns]] = True
     ever = pit.loc[pit.index >= START].any()
@@ -60,10 +77,10 @@ def main() -> None:
     lines = [
         "# 규칙서 10 생존 편향 점검: 그때의 S&P 500 (상장폐지 포함) vs 지금 S&P 500",
         "",
-        f"- 기간: {START} ~ {dates[-1].date()} (가격 자료가 2026년 3월까지라 여기서 끝납니다). 편도 비용 {a.cost_bps / 100:.2f}%.",
+        f"- 기간: {START} ~ {dates[-1].date()} (무료 1분봉 자료가 끝나는 날까지). 편도 비용 {a.cost_bps / 100:.2f}%.",
         "- 가격: 무료 1분봉(mito0o852/OHLCV-1m, 상장폐지 종목 포함)을 정규장 하루로 묶음. 배당 보정 없음, 주식분할은 "
         f"밤사이 갭이 분할 비율과 맞으면 되돌림 ({info['splits']}건 찾음) [근사].",
-        f"- 그때 구성 종목: 위키백과 S&P 500 현재 목록 + 변경 표({len(changes)}건)를 거꾸로 적용. 검증 구간에 한 번이라도 들어 "
+        f"- 그때 구성 종목: {source}. 검증 구간에 한 번이라도 들어 "
         f"있던 종목 {int(ever.sum())}개 중 지금은 빠진 종목 {len(removed_names)}개, 그중 가격이 있는 종목 {len(have)}개.",
         f"- 빠진 뒤 10거래일 넘게 가격이 끊기면 그 뒤를 자름({info['cut']}개). 들고 있던 종목의 가격이 10거래일 넘게 없으면 "
         "마지막 가격에 판 것으로 봄('거래 중단').",
