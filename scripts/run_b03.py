@@ -26,7 +26,10 @@ VARIANTS = [("G1", "G1 기본 (갭 4%, 15분 고가 돌파)", 5, 5e6, 0.04, 0.10
             ("G5", "G5 소형주 (2달러↑, 평소 100만$↑)", 2, 1e6, 0.04, 0.10, "r15"),
             ("G6", "G6 실적 발표일만 (SEC 8-K 2.02)", 5, 5e6, 0.04, None, "r15"),
             ("G7", "G7 G1 + 2R에서 절반 익절", 5, 5e6, 0.04, 0.10, "r15h"),
-            ("G8", "G8 9:31 시가 바로 매수, 손절 장전 저가", 5, 5e6, 0.04, 0.10, "open")]
+            ("G8", "G8 9:31 시가 바로 매수, 손절 장전 저가", 5, 5e6, 0.04, 0.10, "open"),
+            # 규칙서에 없는 점검용: 레버리지 ETF처럼 뉴스와 무관하게 갭이 뜨는 상품을 빼고, 실적 공시를 낸 적 있는 회사 주식만
+            ("G1c", "G1c G1을 회사 주식만 (실적 공시 이력 있는 종목)", 5, 5e6, 0.04, 0.10, "r15"),
+            ("G2c", "G2c G2를 회사 주식만", 5, 5e6, 0.08, 0.10, "r15")]
 ENTRIES = ("r15", "r5", "pm", "r15h", "open")
 
 
@@ -72,8 +75,10 @@ def base_trades(prep, feats):
     return pd.DataFrame(rows).merge(feats, on=["ticker", "d"], how="left")
 
 
-def pick(t, earn, price, adv, gap, pm, entry):
+def pick(t, earn, price, adv, gap, pm, entry, companies=None):
     s = t[(t.entry == entry) & (t.o >= price) & (t.adv >= adv) & (t.gap >= gap)]
+    if companies is not None:
+        s = s[s.ticker.isin(companies)]
     if pm is None:
         if earn is None:
             return s.iloc[0:0]
@@ -111,8 +116,9 @@ def main():
              "| 변형 | 신호 수 | 하루 평균 | 비용 전 평균 | 비용 전 중앙값 | 비용 후 평균 | 승률(비용 후) | 평균 손절폭 | 청산 이유 | 관문 |",
              "|---|---|---|---|---|---|---|---|---|---|"]
     sel, passed = {}, []
+    companies = set(earn.ticker) if earn is not None else set()
     for code, name, price, adv, gap, pm, entry in VARIANTS:
-        s = pick(t, earn, price, adv, gap, pm, entry)
+        s = pick(t, earn, price, adv, gap, pm, entry, companies if code.endswith("c") else None)
         sel[code] = s
         if s.empty:
             lines.append(f"| {name} | 0 | | | | | | | | |")
@@ -171,6 +177,8 @@ def main():
     g1 = sel["G1"]
     if not g1.empty:
         lines.append(f"\nG1 신호가 많은 종목: {', '.join(f'{k} {v}' for k, v in g1.ticker.value_counts().head(15).items())}")
+        if not sel["G1c"].empty:
+            lines.append(f"G1c 신호가 많은 종목: {', '.join(f'{k} {v}' for k, v in sel['G1c'].ticker.value_counts().head(15).items())}")
         lines.append(f"G1 매수 시각 중앙값: 9:30 + {int(g1.entry_mi.median())}분")
     text = "\n".join(lines) + "\n"
     open(os.path.join(a.out, "report.md"), "w").write(text)
