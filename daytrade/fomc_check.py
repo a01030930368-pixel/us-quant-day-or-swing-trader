@@ -44,7 +44,7 @@ def meetings(text, year_of):
         chunk = text[m.end(): ms[k + 1].start() if k + 1 < len(ms) else len(text)]
         head = chunk[:80]
         before = text[max(0, m.start() - 25): m.start()]
-        if re.search(r"Released|Meeting -", before):  # 회의록 공개일 등 다른 날짜
+        if re.search(r"(Released|Meeting -)\s*$", before):  # 바로 앞이 'Released'면 회의록 공개일 등 다른 날짜
             continue
         if not re.match(r"\s*(\*|\(unscheduled\))?\s*(Meeting|Statement|Press Conference|Minutes|Implementation|\(un)", chunk):
             continue

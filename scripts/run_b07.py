@@ -69,7 +69,7 @@ def main():
             continue
         sp = {c: b07.spike(bars[("SPY", r.d)], b07.to_mi(c)) or 0.0 for c in cands}
         best = max(sp, key=sp.get)
-        chk.append(dict(d=r.d, announce=r.announce, best=best, ratio=sp[r.announce], ok=best == r.announce and sp[best] >= 3))
+        chk.append(dict(d=r.d, announce=r.announce, best=best, ratio=sp[r.announce], top=best == r.announce, ok=sp[r.announce] >= 3))
     chk = pd.DataFrame(chk)
 
     rows = []
@@ -112,8 +112,9 @@ def main():
     if os.path.exists(a.fed_check):
         lines += ["## 연준 일정표 대조", "", "```", open(a.fed_check).read().strip(), "```", ""]
     bad = chk[~chk.ok]
-    lines += ["## 발표 시각 확인 (12:30·14:00·14:15 중 SPY 1분 거래량이 가장 크게 튄 시각이 표의 발표 시각이고, 평소의 3배 이상인가)", "",
-              f"{int(chk.ok.sum())} / {len(chk)}번 맞음 (튄 정도 중앙값 {chk.ratio.median():.1f}배). 안 맞은 날: "
+    lines += ["## 발표 시각 확인 (표의 발표 시각 1~3분 SPY 거래량이 그 전 1시간 평소의 3배 이상 튀었나)", "",
+              f"{int(chk.ok.sum())} / {len(chk)}번 3배 이상 (튄 정도 중앙값 {chk.ratio.median():.1f}배). "
+              f"12:30·14:00·14:15 중 가장 크게 튄 시각이 표의 시각인 날 {int(chk.top.sum())}번. 3배 미만인 날: "
               + (", ".join(f"{r.d} (표 {r.announce} {r.ratio:.1f}배, 가장 튄 시각 {r.best})" for r in bad.itertuples()) or "없음"), "",
               f"## 1차 관문: 비용 전 거래당 평균 ≥ +{GATE * 100:.1f}% 인가", "",
               "| 변형 | 회의 수 | 비용 전 평균 | 비용 전 중앙값 | 비용 전 승률 | t값 | 비용 후 평균 | 비용 후 (미끄러짐 0.02%) | 비용 후 승률 | 비용 후 t값 | 관문 |",

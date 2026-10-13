@@ -201,3 +201,24 @@ def test_b07_spike():
     v = np.full(390, 100.0); v[271] = 900.0
     day = dict(mi=mi, v=v)
     assert b07.spike(day, 270) == 9.0 and b07.spike(day, 180) == 1.0
+
+
+def test_b08_ipo_first_day():
+    from daytrade import b08
+    mi = np.arange(150, 390)                            # 12:00 첫 거래
+    n = len(mi)
+    o = np.full(n, 22.0); h = np.full(n, 22.5); l = np.full(n, 21.5); c = np.full(n, 22.0)
+    o[0], c[0] = 20.0, 21.0
+    c[-1] = 23.1
+    day = dict(mi=mi, o=o, h=h, l=l, c=c, v=np.full(n, 1e4))
+    assert abs(b08.trade(day)["gross"] - 0.1) < 1e-12              # 첫 종가 21 -> 23.1
+    assert abs(b08.trade(day, "I2")["gross"] - 0.155) < 1e-12      # 첫 시가 20 -> 23.1
+    t = b08.trade(day, delay=15, cond="up")                         # 15분 뒤 시가 22, 직전 종가 22 > 20
+    assert t["entry_mi"] == 165 and abs(t["gross"] - 0.05) < 1e-12
+    assert b08.trade(day, delay=30, cond="down") is None
+    l2 = l.copy(); l2[5] = 19.0                                     # 21*0.92=19.32 아래로
+    t = b08.trade(dict(day, l=l2), stop=0.08)
+    assert t["reason"] == "손절" and abs(t["exit_px"] - 19.32) < 1e-9
+    assert b08.trade(dict(day, mi=mi + 200)) is None                # 15:00 넘어 첫 거래
+    assert b08.is_spac_like("ABCDU", day) and b08.is_spac_like("AB.WS", day) and not b08.is_spac_like("ABNB", day)
+    assert abs(b08.dv60(day) - (21 + 59 * 22) * 1e4) < 1e-6

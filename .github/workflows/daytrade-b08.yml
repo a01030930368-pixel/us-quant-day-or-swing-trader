@@ -1,0 +1,70 @@
+# 데이트레이딩 규칙서 b08 백테스트 (IPO 첫날 시가 매수 -> 종가 매도) (무료 1분봉 mito0o852/OHLCV-1m, 1992-01 ~ 2026-03).
+# 1) prep: 해마다 월 파일을 받아 '그해 처음 보이는 종목'의 첫날 1분봉과 종목코드별 처음/마지막 거래일 표를 남긴다. 캐시에 남긴다.
+# 2) backtest: 여러 해 표를 모아 진짜 IPO 첫날을 가리고 I1~I8을 계산한다. 결과는 Summary와 첨부파일(b08-report)에 남는다.
+name: daytrade-b08
+on:
+  push:
+    branches: [claude/daytrade-b01-8wz04e]
+    paths: [daytrade/prep_b08.py, daytrade/b08.py, scripts/run_b08.py, .github/workflows/daytrade-b08.yml]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q tests
+  prep:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        year: [1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: prep_b08
+          key: b08-prep-${{ matrix.year }}-${{ hashFiles('daytrade/prep.py', 'daytrade/prep_b08.py') }}
+      - uses: actions/setup-python@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.12"
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: pip install -r requirements.txt
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: python daytrade/prep_b08.py --year ${{ matrix.year }} --out prep_b08
+      - run: ls -la prep_b08
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b08-prep-${{ matrix.year }}
+          path: prep_b08
+          retention-days: 7
+  backtest:
+    needs: prep
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: b08-prep-*
+          path: prep_b08
+          merge-multiple: true
+      - run: python scripts/run_b08.py --prep prep_b08 --out reports/b08
+      - run: cat reports/b08/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b08-report
+          path: reports/b08
