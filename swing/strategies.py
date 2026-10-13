@@ -24,6 +24,8 @@ class Strategy:
     description = ""
     max_positions = 5
     order_all = False                # True: send every candidate, the engine fills until slots run out
+    close_fill = False               # True: entry_fill returns the signal day's close, so the
+                                     # position is held through the next open (gap stops fill at the open)
 
     def prepare(self, d: dict[str, pd.DataFrame], market: str = "SPY") -> "Strategy":
         self.o, self.h, self.l, self.c = d["Open"], d["High"], d["Low"], d["Close"]
@@ -69,6 +71,14 @@ class Strategy:
         day i's high. A strategy may also change pos here (for example mark a
         partial sale as done, or move the stop for tomorrow).
         """
+        return None
+
+    def open_exit(self, pos: dict, i: int) -> str | None:
+        """Reason to sell the whole position at day i's open, judged from that open, or None."""
+        return None
+
+    def close_exit(self, pos: dict, i: int) -> str | None:
+        """Reason to sell the whole position at day i's close, judged from that close, or None."""
         return None
 
     def update_stop(self, pos: dict, i: int) -> float | None:
@@ -149,6 +159,14 @@ class Breakout(Strategy):
     def initial_stop(self, ticker: str, i: int, price: float) -> float | None:
         a = self.atr20[ticker].iloc[i - 1]
         return price - 2 * a if pd.notna(a) else price * 0.9
+
+    def open_exit(self, pos: dict, i: int) -> str | None:
+        """Reason to sell the whole position at day i's open, judged from that open, or None."""
+        return None
+
+    def close_exit(self, pos: dict, i: int) -> str | None:
+        """Reason to sell the whole position at day i's close, judged from that close, or None."""
+        return None
 
     def update_stop(self, pos: dict, i: int) -> float | None:
         t = pos["ticker"]
