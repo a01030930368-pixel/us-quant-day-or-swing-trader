@@ -116,8 +116,16 @@ jobs:
         run: >
           python scripts/run_backtest.py --set jongga --universe sp1500 --start ${{ inputs.start || '2010-01-01' }}
           --split ${{ inputs.split || '2018-01-01' }} --cost-bps 30
+      - name: 유튜브 추세 종배 200일선 위 첫 장대양봉 (S&P 500 + 400, 편도 0.30%)
+        run: >
+          python scripts/run_backtest.py --set trend --universe sp1500 --start ${{ inputs.start || '2010-01-01' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps 30
+      - name: 유튜브 세븐 스플릿 + 엔벨로프 하단 분할 매수 (S&P 500 + 400, 편도 0.30%)
+        run: >
+          python scripts/run_backtest.py --set split7 --universe sp1500 --start ${{ inputs.start || '2010-01-01' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps 30
       - run: >
-          cat reports/swing_report_jongga_sp1500.md reports/swing_report_namsg_sp1500.md reports/swing_report_hong_sp1500.md reports/swing_report_gojiro_sp1500.md reports/swing_report_velez_sp1500.md reports/swing_report_chartdoc_sp1500.md reports/swing_report_ptj_sp1500.md reports/swing_report_pullback_yt_sp1500.md reports/swing_report_sewer_sp1500.md reports/swing_report_sewer_small.md reports/swing_report_blend_sp1500.md reports/swing_report_insider_sp1500.md reports/swing_report_announce_sp1500.md reports/swing_report_quality_sp1500.md reports/swing_report_reversion_sp1500.md reports/swing_report_pead_sp1500.md reports/swing_report_large.md reports/swing_report_all.md
+          cat reports/swing_report_split7_sp1500.md reports/swing_report_trend_sp1500.md reports/swing_report_jongga_sp1500.md reports/swing_report_namsg_sp1500.md reports/swing_report_hong_sp1500.md reports/swing_report_gojiro_sp1500.md reports/swing_report_velez_sp1500.md reports/swing_report_chartdoc_sp1500.md reports/swing_report_ptj_sp1500.md reports/swing_report_pullback_yt_sp1500.md reports/swing_report_sewer_sp1500.md reports/swing_report_sewer_small.md reports/swing_report_blend_sp1500.md reports/swing_report_insider_sp1500.md reports/swing_report_announce_sp1500.md reports/swing_report_quality_sp1500.md reports/swing_report_reversion_sp1500.md reports/swing_report_pead_sp1500.md reports/swing_report_large.md reports/swing_report_all.md
           reports/swing_report_legends2_all.md reports/swing_report_refine_all.md
           reports/swing_report_legends_all_small.md reports/swing_report_earnings_all.md
           reports/swing_report_earnings_wide_sp1500.md >> "$GITHUB_STEP_SUMMARY"
@@ -125,3 +133,26 @@ jobs:
         with:
           name: swing-report
           path: reports/
+
+  # 규칙서 10 생존 편향 점검: 그때의 S&P 500 종목(상장폐지 포함) vs 지금 종목.
+  # 가격은 데이트레이딩 b04 워크플로(실행 38376734678)가 무료 1분봉에서 만든 하루 표를 받아 씁니다(2026-10-20까지 보관).
+  split7_pit:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: b04-prep-20*
+          path: prep_daily
+          run-id: 38376734678
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: rm -f prep_daily/*/bars_*.parquet && du -sh prep_daily
+      - run: python scripts/run_split7_pit.py --daily prep_daily --out reports/split7_pit.md
+      - run: cat reports/split7_pit.md >> "$GITHUB_STEP_SUMMARY"

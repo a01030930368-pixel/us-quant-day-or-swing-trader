@@ -46,6 +46,8 @@ class Result:
 
 
 def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) -> Result:
+    if hasattr(strategy, "simulate"):            # strategies with their own bookkeeping (separate lots)
+        return strategy.simulate(cost_bps, start)
     o, h, l, c = strategy.o, strategy.h, strategy.l, strategy.c
     dates = c.index
     first = 0 if start is None else int(dates.searchsorted(pd.Timestamp(start)))
@@ -130,8 +132,8 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
                 continue
             budget = prev_equity * strategy.weight(t, i - 1)
             spend = min(budget, cash / (1 + cost))
-            if spend < budget * 0.5:          # not enough cash left for a real slot
-                break
+            if spend < budget * 0.5 and not getattr(strategy, "partial_ok", False):
+                break                         # not enough cash left for a real slot
             px = strategy.entry_fill(t, i, px, h[t].iloc[i])
             if px is None or not strategy.accept_entry(t, i, px):
                 continue
@@ -155,7 +157,7 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
             if pd.notna(op):
                 reason = strategy.open_exit(positions[t], i)
                 if reason:
-                    close_trade(t, i, op, reason)
+                    close_trade(t, i, op, *(reason if isinstance(reason, tuple) else (reason,)))
 
         # 2. Intraday stop losses (not on the entry day's open itself).
         for t in list(positions):
@@ -167,6 +169,16 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
                 close_trade(t, i, op, "손절 (갭 하락)")
             elif lo <= stop:
                 close_trade(t, i, stop, "손절")
+
+        # 2a'. Partial sells at price levels below (e.g. a third at the buy price, a third at -3%).
+        for t in list(positions):
+            lo, op = l[t].iloc[i], o[t].iloc[i]
+            if pd.isna(lo):
+                continue
+            for level, frac, reason in strategy.partial_stops(positions[t], i):
+                if t in positions and lo <= level:
+                    early = positions[t]["entry_i"] < i or positions[t]["before_open"]
+                    close_trade(t, i, op if early and op < level else level, reason, frac)
 
         # 2b. Intraday profit targets (full or partial sells).
         for t in list(positions):
