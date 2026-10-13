@@ -73,6 +73,17 @@ class Strategy:
         """
         return None
 
+    def bought_before_open(self, ticker: str) -> bool:
+        """True if the buy just made filled at the previous close (held through today's open)."""
+        return self.close_fill
+
+    def close_add(self, pos: dict, i: int) -> float | None:
+        """Share of the account to add at day i's close, judged from that close, or None."""
+        return None
+
+    def on_close(self, trade: dict, i: int) -> None:
+        """Called after every sale (whole or part) with the trade row, e.g. to count losing streaks."""
+
     def open_exit(self, pos: dict, i: int) -> str | None:
         """Reason to sell the whole position at day i's open, judged from that open, or None."""
         return None
@@ -162,6 +173,17 @@ class Breakout(Strategy):
     def initial_stop(self, ticker: str, i: int, price: float) -> float | None:
         a = self.atr20[ticker].iloc[i - 1]
         return price - 2 * a if pd.notna(a) else price * 0.9
+
+    def bought_before_open(self, ticker: str) -> bool:
+        """True if the buy just made filled at the previous close (held through today's open)."""
+        return self.close_fill
+
+    def close_add(self, pos: dict, i: int) -> float | None:
+        """Share of the account to add at day i's close, judged from that close, or None."""
+        return None
+
+    def on_close(self, trade: dict, i: int) -> None:
+        """Called after every sale (whole or part) with the trade row, e.g. to count losing streaks."""
 
     def open_exit(self, pos: dict, i: int) -> str | None:
         """Reason to sell the whole position at day i's open, judged from that open, or None."""
