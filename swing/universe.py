@@ -105,6 +105,56 @@ def sp1500(cache: Path = Path("data_cache") / "sp1500.txt") -> list[str]:
     return out
 
 
+def sp_info(cache: Path = Path("data_cache") / "sp1500_info.csv"):
+    """Today's S&P 500 / 400 / 600 members with their index and GICS sector and sub-industry.
+
+    Read from the same Wikipedia pages as sp1500(). Returns a DataFrame indexed
+    by ticker with columns index (500, 400 or 600), sector and sub_industry
+    (empty when a page has no such column). Today's members only, so the same
+    survivorship bias applies, and the industry is today's, not the one at
+    the time of each trade.
+    """
+    from io import StringIO
+
+    import pandas as pd
+
+    if cache.exists():
+        return pd.read_csv(cache, index_col=0, keep_default_na=False)
+    import requests
+
+    def pick(table, *names):
+        cols = {str(c).strip().lower(): c for c in table.columns}
+        for n in names:
+            for k, c in cols.items():
+                if n in k:
+                    return c
+        return None
+
+    rows = []
+    for n, url in zip((500, 400, 600), SP1500_PAGES):
+        html = requests.get(url, headers={"User-Agent": "us-quant-day-or-swing-trader backtest"},
+                            timeout=30).text
+        for table in pd.read_html(StringIO(html)):
+            sym = pick(table, "symbol", "ticker")
+            if sym is None or len(table) < 300:
+                continue
+            sub = pick(table, "sub-industry", "sub industry")
+            sec = pick(table, "gics sector", "sector")
+            for _, r in table.iterrows():
+                t = str(r[sym]).strip().replace(".", "-")
+                if t and t != "nan" and t != MARKET:
+                    rows.append({"ticker": t, "index": n,
+                                 "sector": "" if sec is None else str(r[sec]).strip(),
+                                 "sub_industry": "" if sub is None else str(r[sub]).strip()})
+            break
+        else:
+            raise RuntimeError(f"종목 표를 찾지 못했습니다: {url}")
+    out = pd.DataFrame(rows).drop_duplicates("ticker").set_index("ticker")
+    cache.parent.mkdir(exist_ok=True)
+    out.to_csv(cache)
+    return out
+
+
 def tickers(universe: str) -> list[str]:
     return sp1500() if universe == "sp1500" else UNIVERSES[universe]
 

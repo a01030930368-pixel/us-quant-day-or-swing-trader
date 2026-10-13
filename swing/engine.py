@@ -7,11 +7,13 @@ Timeline for each trading day i, which keeps the strategy from seeing the future
            day if the strategy uses one (filled only if the high reaches it).
            Each buy gets the strategy's weight (at most 1/max_positions of the
            account, the per-stock limit).
+           A strategy may also sell at the open because of the open itself (a gap).
 2. During the day: a stop loss fills at the stop price if the low touches it,
            or at the open if the stock gaps below the stop. Then a profit
            target (if the strategy has one) fills at the target if the high
            reaches it, or at the open on a gap above it. Stops are checked
            first, the cautious assumption when both happen on one day.
+           A strategy may also sell at the close because of the day's close.
 3. Close:  value the account, move trailing stops, and decide tomorrow's
            sells, buys and adds to winners (pyramiding) from today's close.
            An add is bought at the next open and the position's entry price
@@ -119,13 +121,24 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
             cash -= spend * (1 + cost)
         pending_buys = []
 
+        # A strategy that buys at the previous close already holds the stock at today's open.
+        close_fill = getattr(strategy, "close_fill", False)
+
+        # 2a. Sells at today's open decided by the open itself (e.g. a gap down).
+        for t in list(positions):
+            op = o[t].iloc[i]
+            if pd.notna(op):
+                reason = strategy.open_exit(positions[t], i)
+                if reason:
+                    close_trade(t, i, op, reason)
+
         # 2. Intraday stop losses (not on the entry day's open itself).
         for t in list(positions):
             stop = positions[t]["stop"]
             lo, op = l[t].iloc[i], o[t].iloc[i]
             if stop is None or pd.isna(lo):
                 continue
-            if positions[t]["entry_i"] < i and op <= stop:
+            if (positions[t]["entry_i"] < i or close_fill) and op <= stop:
                 close_trade(t, i, op, "손절 (갭 하락)")
             elif lo <= stop:
                 close_trade(t, i, stop, "손절")
@@ -142,8 +155,16 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
                 continue
             target, frac, reason = tp
             if hi >= target:
-                fill = op if pos["entry_i"] < i and op > target else target
+                fill = op if (pos["entry_i"] < i or close_fill) and op > target else target
                 close_trade(t, i, fill, reason, frac)
+
+        # 2c. Sells at today's close decided by the strategy (e.g. "sell on the third day's close").
+        for t in list(positions):
+            px = c[t].iloc[i]
+            if pd.notna(px):
+                reason = strategy.close_exit(positions[t], i)
+                if reason:
+                    close_trade(t, i, px, reason)
 
         # 3. Close: value the account, then plan tomorrow.
         value = cash + sum(p["shares"] * last_close[t].iloc[i] for t, p in positions.items())
