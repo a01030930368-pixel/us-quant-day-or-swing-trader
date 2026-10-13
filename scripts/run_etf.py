@@ -478,7 +478,22 @@ def rule_b25(days, daily, cal, half, spy, df, prep):
                      f"{pct(g[y >= 2025].mean())} ({int((y >= 2025).sum())}) | {ex * 100:+.2f}%p | {pct(net.mean())} | {pct(s.stop_dist.mean())} | "
                      f"{', '.join(f'{k} {v}' for k, v in s.reason.value_counts().items())} | {v} |")
     lines += ["", f"**관문 통과 변형: {', '.join(passed) if passed else '없음 → b25 탈락'}**", ""]
-    lines += ["## 종목별 (C1 / C3, 비용 전)", "", "| 종목 | C1 수 | C1 평균 | C3 수 | C3 평균 |", "|---|---|---|---|---|"]
+    lines += ["## 믿을 만한가 (같은 날 거래는 서로 비슷하게 움직이므로 날 단위로도 봄)", "",
+              "| 변형 | 날 수 | 날 평균 | 날 단위 t값 | 상위 10개 거래 뺀 평균 | 상위 3일 뺀 평균 | 2021년 뺀 평균 | 2024년 뺀 평균 |", "|---|---|---|---|---|---|---|---|"]
+    for c, s in sel.items():
+        if not len(s):
+            continue
+        dm = s.groupby("d").gross.mean()
+        y = pd.to_datetime(s.d).dt.year
+        top3 = dm.nlargest(3).index
+        lines.append(f"| {names[c]} | {len(dm)} | {pct(dm.mean())} | {tstat(dm):.2f} | {pct(s.gross.sort_values(ascending=False).iloc[10:].mean())} | "
+                     f"{pct(s.gross[~s.d.isin(top3)].mean())} | {pct(s.gross[y != 2021].mean())} | {pct(s.gross[y != 2024].mean())} |")
+    th = "| 날짜 | 종목 | 비트코인 주말 | 매수가 | 비용 전 |"
+    for c in ("C1", "C4"):
+        s = sel[c]
+        lines += ["", f"{names[c]} 가장 좋은 10개 / 나쁜 5개:", "", th, "|---|---|---|---|---|"]
+        lines += [f"| {r.d} | {r.ticker} | {r.ret * 100:+.1f}% | {r.entry_px:.2f} | {r.gross * 100:+.1f}% |" for r in pd.concat([s.nlargest(10, "gross"), s.nsmallest(5, "gross")]).itertuples()]
+    lines += ["", "## 종목별 (C1 / C3, 비용 전)", "", "| 종목 | C1 수 | C1 평균 | C3 수 | C3 평균 |", "|---|---|---|---|---|"]
     for tk in CRYPTO:
         a, b = sel["C1"][sel["C1"].ticker == tk].gross, sel["C3"][sel["C3"].ticker == tk].gross
         if len(a) or len(b):
@@ -506,6 +521,8 @@ def rule_b25(days, daily, cal, half, spy, df, prep):
         r, taken = portfolio.daily_returns(k, days_idx, k.cost, max_w=0.2, max_pos=5)
         st = portfolio.stats(r)
         lines.append(f"| {names[c]} | {pct(st['cagr'], 1)} | {pct(st['mdd'], 1)} | {st['sharpe']:.2f} | {len(taken)} |")
+    up5 = ev[ev.weekend & (ev.ret >= 0.05)]
+    lines += ["", "주말 비트코인 +5% 이상 횟수 (해마다): " + ", ".join(f"{y} {n}" for y, n in pd.to_datetime(up5.d).dt.year.value_counts().sort_index().items())]
     top = ev[ev.weekend].sort_values("ret")
     lines += ["", "## 눈으로 확인: 주말 비트코인 움직임 큰 날", "",
               "가장 많이 오른 5번: " + ", ".join(f"{r.d} {r.ret * 100:+.1f}%" for r in top.tail(5).iloc[::-1].itertuples()),
