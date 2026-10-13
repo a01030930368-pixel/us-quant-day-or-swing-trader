@@ -1,0 +1,70 @@
+# 데이트레이딩 규칙서 b06 백테스트 (레버리지 ETF 장 막판 쏠림) (무료 1분봉 mito0o852/OHLCV-1m, 2006-01 ~ 2026-03).
+# 1) prep: 해마다 월 파일을 받아 SPY·QQQ·SOXX와 2·3배 ETF의 정규장 1분봉만 뽑는다. 캐시에 남긴다.
+# 2) backtest: R1~R9를 계산한다. 결과는 Summary와 첨부파일(b06-report)에 남는다.
+name: daytrade-b06
+on:
+  push:
+    branches: [claude/daytrade-b01-8wz04e]
+    paths: [daytrade/prep_b06.py, daytrade/b06.py, scripts/run_b06.py, .github/workflows/daytrade-b06.yml]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q tests
+  prep:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 11
+      matrix:
+        year: [2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: prep_b06
+          key: b06-prep-${{ matrix.year }}-${{ hashFiles('daytrade/prep.py', 'daytrade/prep_b06.py') }}
+      - uses: actions/setup-python@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.12"
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: pip install -r requirements.txt
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: python daytrade/prep_b06.py --year ${{ matrix.year }} --out prep_b06
+      - run: ls -la prep_b06
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b06-prep-${{ matrix.year }}
+          path: prep_b06
+          retention-days: 7
+  backtest:
+    needs: prep
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: b06-prep-*
+          path: prep_b06
+          merge-multiple: true
+      - run: python scripts/run_b06.py --prep prep_b06 --out reports/b06
+      - run: cat reports/b06/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b06-report
+          path: reports/b06

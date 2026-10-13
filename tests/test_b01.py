@@ -159,3 +159,22 @@ def test_b05_oops_entry_stop_and_swing():
     # F7: 2일째 시가 9.9(매수가 아래) -> 보유, 3일째 시가 10.4 -> 그 시가에 매도
     t = b05.swing(day, i, px, stop, dict(o=np.array([9.9, 10.4]), l=np.array([9.8, 10.3]), c=np.array([10.1, 10.5])))
     assert t["days"] == 3 and t["reason"] == "이익 난 시가" and abs(t["gross"] - 0.04) < 1e-12
+
+
+def test_b06_leveraged_etf_close_momentum():
+    from daytrade import b06
+    mi = np.arange(390)
+    idx = dict(mi=mi, c=np.full(390, 102.5))           # 14:44 종가 102.5, 전날 종가 100 -> +2.5%
+    move, sgn = b06.signal(idx, 100.0, 0.02, 315)
+    assert sgn == 1 and abs(move - 0.025) < 1e-12
+    assert b06.signal(idx, 102.0, 0.02, 315)[1] == 0
+    o = np.full(390, 50.0); h = np.full(390, 50.5); l = np.full(390, 49.5); c = np.full(390, 50.0)
+    o[316], c[389] = 40.0, 42.0                        # 14:46 시가 40에 매수, 15:59 종가 42
+    etf = dict(mi=mi, o=o, h=h, l=l, c=c)
+    t = b06.hold(etf, 315)
+    assert t["entry_mi"] == 316 and abs(t["gross"] - 0.05) < 1e-12
+    t = b06.hold(etf, 315, exit_at=385)                 # 15:55 시가 50
+    assert abs(t["gross"] - 0.25) < 1e-12
+    l2 = l.copy(); l2[316] = 39.0                       # 매수한 봉에서 -2% (39.2) 아래로
+    t = b06.hold(dict(etf, l=l2), 315, stop=0.02)
+    assert t["reason"] == "손절" and abs(t["gross"] + 0.02) < 1e-12
