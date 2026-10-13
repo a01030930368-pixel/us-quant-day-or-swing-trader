@@ -108,8 +108,12 @@ jobs:
         run: >
           python scripts/run_backtest.py --set hong --universe sp1500 --start ${{ inputs.start || '2010-01-01' }}
           --split ${{ inputs.split || '2018-01-01' }} --cost-bps 30
+      - name: 유튜브 남석관 장대양봉 후 첫 5일선 분할 매수 (S&P 500 + 400, 편도 0.30%)
+        run: >
+          python scripts/run_backtest.py --set namsg --universe sp1500 --start ${{ inputs.start || '2010-01-01' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps 30
       - run: >
-          cat reports/swing_report_hong_sp1500.md reports/swing_report_gojiro_sp1500.md reports/swing_report_velez_sp1500.md reports/swing_report_chartdoc_sp1500.md reports/swing_report_ptj_sp1500.md reports/swing_report_pullback_yt_sp1500.md reports/swing_report_sewer_sp1500.md reports/swing_report_sewer_small.md reports/swing_report_blend_sp1500.md reports/swing_report_insider_sp1500.md reports/swing_report_announce_sp1500.md reports/swing_report_quality_sp1500.md reports/swing_report_reversion_sp1500.md reports/swing_report_pead_sp1500.md reports/swing_report_large.md reports/swing_report_all.md
+          cat reports/swing_report_namsg_sp1500.md reports/swing_report_hong_sp1500.md reports/swing_report_gojiro_sp1500.md reports/swing_report_velez_sp1500.md reports/swing_report_chartdoc_sp1500.md reports/swing_report_ptj_sp1500.md reports/swing_report_pullback_yt_sp1500.md reports/swing_report_sewer_sp1500.md reports/swing_report_sewer_small.md reports/swing_report_blend_sp1500.md reports/swing_report_insider_sp1500.md reports/swing_report_announce_sp1500.md reports/swing_report_quality_sp1500.md reports/swing_report_reversion_sp1500.md reports/swing_report_pead_sp1500.md reports/swing_report_large.md reports/swing_report_all.md
           reports/swing_report_legends2_all.md reports/swing_report_refine_all.md
           reports/swing_report_legends_all_small.md reports/swing_report_earnings_all.md
           reports/swing_report_earnings_wide_sp1500.md >> "$GITHUB_STEP_SUMMARY"
