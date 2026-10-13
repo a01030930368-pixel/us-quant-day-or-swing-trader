@@ -178,3 +178,18 @@ def test_b06_leveraged_etf_close_momentum():
     l2 = l.copy(); l2[316] = 39.0                       # 매수한 봉에서 -2% (39.2) 아래로
     t = b06.hold(dict(etf, l=l2), 315, stop=0.02)
     assert t["reason"] == "손절" and abs(t["gross"] + 0.02) < 1e-12
+
+
+def test_b07_fomc_window():
+    from daytrade import b07
+    assert b07.to_mi("14:00") == 270 and b07.to_mi("12:30") == 180
+    mi = np.arange(390)
+    o = np.full(390, 50.0); c = np.full(390, 50.0); v = np.full(390, 100.0)
+    o[265], c[325] = 40.0, 42.0                        # 13:55 시가 40 매수, 14:55 종가 42 매도
+    v[271] = 9999.0                                    # 14:01 거래량 최대
+    day = dict(mi=mi, o=o, c=c, v=v)
+    t = b07.window(day, 265, 325)
+    assert t["entry_mi"] == 265 and t["exit_mi"] == 325 and abs(t["gross"] - 0.05) < 1e-12
+    assert b07.busiest_minute(day) == 271
+    assert b07.price_before(day, 271) == c[270]
+    assert b07.window(dict(mi=mi[:200], o=o[:200], c=c[:200], v=v[:200]), 265, 325) is None

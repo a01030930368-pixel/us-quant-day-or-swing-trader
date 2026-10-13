@@ -1,0 +1,91 @@
+# 데이트레이딩 규칙서 b07 백테스트 (FOMC 발표 직후 안도 랠리, 3배 ETF) (무료 1분봉 mito0o852/OHLCV-1m).
+# 1) prep: b06과 같은 1분봉(SPY·QQQ·레버리지 ETF)을 쓴다. b06 캐시가 있으면 그대로 쓴다.
+# 2) fedcheck: daytrade/fomc_dates.csv(회의 날짜·기자회견 여부)를 연준 홈페이지 일정표와 대조한다.
+# 3) backtest: V1~V8을 계산한다. 결과는 Summary와 첨부파일(b07-report)에 남는다.
+name: daytrade-b07
+on:
+  push:
+    branches: [claude/daytrade-b01-8wz04e]
+    paths: [daytrade/fomc_dates.csv, daytrade/fomc_check.py, daytrade/b07.py, scripts/run_b07.py, .github/workflows/daytrade-b07.yml]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q tests
+  fedcheck:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python daytrade/fomc_check.py | tee fomc_check.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b07-fedcheck
+          path: |
+            fomc_check.txt
+            fomc_fed.csv
+  prep:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 11
+      matrix:
+        year: [2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: prep_b06
+          key: b06-prep-${{ matrix.year }}-${{ hashFiles('daytrade/prep.py', 'daytrade/prep_b06.py') }}
+      - uses: actions/setup-python@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.12"
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: pip install -r requirements.txt
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: python daytrade/prep_b06.py --year ${{ matrix.year }} --out prep_b06
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b07-prep-${{ matrix.year }}
+          path: prep_b06
+          retention-days: 7
+  backtest:
+    needs: [prep, fedcheck]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: b07-prep-*
+          path: prep_b06
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: b07-fedcheck
+          path: .
+      - run: python scripts/run_b07.py --prep prep_b06 --fed-check fomc_check.txt --out reports/b07
+      - run: cat reports/b07/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b07-report
+          path: reports/b07
