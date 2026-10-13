@@ -1,0 +1,87 @@
+# 데이트레이딩 규칙서 b05 백테스트 (래리 윌리엄스 웁스 갭 하락 반등) (무료 1분봉 mito0o852/OHLCV-1m, 2018-01 ~ 2026-03).
+# 1) prep: 해마다 월 파일을 받아 전날 저가 아래로 시작한 종목-날짜의 정규장 1분봉과 전 종목 일봉을 뽑는다. 캐시에 남긴다.
+# 1-2) sec: SEC 공시에서 실적 발표(8-K 2.02) 시각을 모은다 (회사 주식 구분과 F5에 필요).
+# 2) backtest: F1~F7을 계산한다. 결과는 Summary와 첨부파일(b05-report)에 남는다.
+name: daytrade-b05
+on:
+  push:
+    branches: [claude/daytrade-b01-8wz04e]
+    paths: [daytrade/prep_b05.py, daytrade/b05.py, daytrade/sec_earnings.py, scripts/run_b05.py, .github/workflows/daytrade-b05.yml]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q tests
+  prep:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 9
+      matrix:
+        year: [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: prep_b05
+          key: b05-prep-${{ matrix.year }}-${{ hashFiles('daytrade/prep.py', 'daytrade/prep_b03.py', 'daytrade/prep_b04.py', 'daytrade/prep_b05.py') }}
+      - uses: actions/setup-python@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.12"
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: pip install -r requirements.txt
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: python daytrade/prep_b05.py --year ${{ matrix.year }} --out prep_b05
+      - run: ls -la prep_b05
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b05-prep-${{ matrix.year }}
+          path: prep_b05
+          retention-days: 7
+  sec:
+    needs: test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python daytrade/sec_earnings.py --out sec/earnings.parquet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b05-prep-sec
+          path: sec
+          retention-days: 7
+  backtest:
+    needs: [prep, sec]
+    if: ${{ !cancelled() && needs.prep.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: b05-prep-*
+          path: prep_b05
+          merge-multiple: true
+      - run: python scripts/run_b05.py --prep prep_b05 --out reports/b05
+      - run: cat reports/b05/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b05-report
+          path: reports/b05

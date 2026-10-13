@@ -140,3 +140,22 @@ def test_b04_episodic_pivot_entry_volume_and_swing():
     t = b04.swing(day, i, px, stop, np.full(9, 10.0), nxt)
     assert t["days"] == 4 and t["reason"] == "절반 후 본전 손절"
     assert abs(t["gross"] - (0.5 * (13 / 10.8 - 1) + 0.5 * (10.5 / 10.8 - 1))) < 1e-12
+
+
+def test_b05_oops_entry_stop_and_swing():
+    from daytrade import b05
+    n = 390
+    mi = np.arange(n)
+    o = np.full(n, 10.2); h = np.full(n, 10.3); l = np.full(n, 10.1); c = np.full(n, 10.2)
+    o[:10], h[:10], l[:10], c[:10] = 9.6, 9.8, 9.5, 9.7   # 전날 저가 10.0 아래에서 시작, 저가 9.5
+    h[10] = 10.05                                          # 9:40에 전날 저가 10.0 회복
+    o[10] = 9.8
+    day = dict(mi=mi, o=o, h=h, l=l, c=c)
+    i, px, stop = b05.find_entry(day, 10.0)
+    assert (i, px, round(stop, 2)) == (10, 10.0, 9.49)
+    t = b05.intraday(day, 10.0)
+    assert t["reason"] == "마감" and abs(t["gross"] - 0.02) < 1e-12
+    assert b05.intraday(day, 10.0, deadline=10) is None    # 9:40 전 마감이면 거래 없음
+    # F7: 2일째 시가 9.9(매수가 아래) -> 보유, 3일째 시가 10.4 -> 그 시가에 매도
+    t = b05.swing(day, i, px, stop, dict(o=np.array([9.9, 10.4]), l=np.array([9.8, 10.3]), c=np.array([10.1, 10.5])))
+    assert t["days"] == 3 and t["reason"] == "이익 난 시가" and abs(t["gross"] - 0.04) < 1e-12
