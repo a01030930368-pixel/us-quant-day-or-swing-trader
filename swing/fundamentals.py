@@ -37,7 +37,12 @@ SALES_TAGS = ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax",
 GROSS_TAGS = ["GrossProfit"]
 COGS_TAGS = ["CostOfRevenue", "CostOfGoodsAndServicesSold", "CostOfGoodsSold"]
 ASSET_TAGS = ["Assets"]
-KEEP_TAGS = EPS_TAGS + SALES_TAGS + GROSS_TAGS + COGS_TAGS + ASSET_TAGS
+# CANSLIM A (rulebook 11): return on equity and operating cash flow from the 10-K
+QUALITY_TAGS = ["NetIncomeLoss", "ProfitLoss", "StockholdersEquity",
+                "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+                "NetCashProvidedByUsedInOperatingActivities",
+                "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"]
+KEEP_TAGS = EPS_TAGS + SALES_TAGS + GROSS_TAGS + COGS_TAGS + ASSET_TAGS + QUALITY_TAGS
 
 
 def _get(url: str) -> dict:
