@@ -61,14 +61,15 @@ def main():
     vol20 = spy.pct_change().rolling(20).std()
     vol_hi = vol20.shift(1) >= vol20.shift(1).rolling(252, min_periods=120).median()
 
-    # 발표 시각 확인: 11:30~15:00 중 SPY 거래량이 가장 많은 1분이 발표 시각(±2분)인가
+    # 발표 시각 확인: 후보 시각(12:30, 14:00, 14:15) 중 거래량이 가장 크게 튄 시각이 표의 발표 시각인가
+    cands = ("12:30", "14:00", "14:15")
     chk = []
     for r in fomc.itertuples():
         if ("SPY", r.d) not in bars:
             continue
-        A = b07.to_mi(r.announce)
-        bm = b07.busiest_minute(bars[("SPY", r.d)])
-        chk.append(dict(d=r.d, announce=r.announce, busiest=bm, ok=bm is not None and A <= bm <= A + 2))
+        sp = {c: b07.spike(bars[("SPY", r.d)], b07.to_mi(c)) or 0.0 for c in cands}
+        best = max(sp, key=sp.get)
+        chk.append(dict(d=r.d, announce=r.announce, best=best, ratio=sp[r.announce], ok=best == r.announce and sp[best] >= 3))
     chk = pd.DataFrame(chk)
 
     rows = []
@@ -111,9 +112,9 @@ def main():
     if os.path.exists(a.fed_check):
         lines += ["## 연준 일정표 대조", "", "```", open(a.fed_check).read().strip(), "```", ""]
     bad = chk[~chk.ok]
-    lines += ["## 발표 시각 확인 (11:30~15:00 중 SPY 거래량 최대 1분이 발표 시각 ~ +2분인가)", "",
-              f"{int(chk.ok.sum())} / {len(chk)}번 맞음. 안 맞은 날: "
-              + (", ".join(f"{r.d} (표 {r.announce}, 최대 9:30+{r.busiest}분)" for r in bad.itertuples()) or "없음"), "",
+    lines += ["## 발표 시각 확인 (12:30·14:00·14:15 중 SPY 1분 거래량이 가장 크게 튄 시각이 표의 발표 시각이고, 평소의 3배 이상인가)", "",
+              f"{int(chk.ok.sum())} / {len(chk)}번 맞음 (튄 정도 중앙값 {chk.ratio.median():.1f}배). 안 맞은 날: "
+              + (", ".join(f"{r.d} (표 {r.announce} {r.ratio:.1f}배, 가장 튄 시각 {r.best})" for r in bad.itertuples()) or "없음"), "",
               f"## 1차 관문: 비용 전 거래당 평균 ≥ +{GATE * 100:.1f}% 인가", "",
               "| 변형 | 회의 수 | 비용 전 평균 | 비용 전 중앙값 | 비용 전 승률 | t값 | 비용 후 평균 | 비용 후 (미끄러짐 0.02%) | 비용 후 승률 | 비용 후 t값 | 관문 |",
               "|---|---|---|---|---|---|---|---|---|---|---|"]

@@ -34,3 +34,12 @@ def busiest_minute(day, lo=120, hi=330):
     mi, v = day["mi"], day["v"]
     m = (mi >= lo) & (mi < hi)
     return int(mi[m][np.argmax(v[m])]) if m.any() else None
+
+
+def spike(day, t):
+    """t ~ t+2분 최대 거래량 / t-60 ~ t-10분 거래량 중앙값. 발표가 있었던 시각이면 크게 튄다."""
+    mi, v = day["mi"], day["v"]
+    now, before = v[(mi >= t) & (mi <= t + 2)], v[(mi >= t - 60) & (mi < t - 10)]
+    if not len(now) or not len(before) or np.median(before) <= 0:
+        return None
+    return float(now.max() / np.median(before))

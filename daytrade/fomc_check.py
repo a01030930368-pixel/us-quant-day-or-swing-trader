@@ -15,7 +15,7 @@ UA = {"User-Agent": "Mozilla/5.0 (us-quant-day-or-swing-trader backtest research
 HIST = "https://www.federalreserve.gov/monetarypolicy/fomchistorical{}.htm"
 CURRENT = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December"
-PAT = re.compile(rf"\b({MONTHS})(?:/({MONTHS}))?\s+(\d{{1,2}})(?:\s*-\s*(\d{{1,2}}))?\b")
+PAT = re.compile(rf"\b({MONTHS})(?:/({MONTHS}))?\s+(\d{{1,2}})(?:\s*-\s*(?:({MONTHS})\s+)?(\d{{1,2}}))?\b")
 
 
 def get(url):
@@ -24,6 +24,8 @@ def get(url):
             with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=60) as r:
                 return r.read().decode("utf-8", "replace")
         except Exception as e:
+            if getattr(e, "code", None) == 404:  # 최근 몇 해는 fomccalendars.htm에만 있다
+                return None
             print("retry", url, e, flush=True)
             time.sleep(5 * (attempt + 1))
     return None
@@ -49,8 +51,8 @@ def meetings(text, year_of):
         y = year_of(m.start())
         if y is None:
             continue
-        mon = m.group(2) or m.group(1)
-        day = int(m.group(4) or m.group(3))
+        mon = m.group(4) or m.group(2) or m.group(1)
+        day = int(m.group(5) or m.group(3))
         try:
             d = pd.Timestamp(f"{mon} {day} {y}").date()
         except ValueError:
@@ -67,17 +69,20 @@ def main():
     ap.add_argument("--first", type=int, default=2011)
     ap.add_argument("--last", type=int, default=2026)
     a = ap.parse_args()
-    found = []
+    found, texts = [], {}
     cur = get(CURRENT)
     if cur:
         t = text_of(cur)
         years = [(m.start(), int(m.group(1))) for m in re.finditer(r"(20\d\d) FOMC Meetings", t)]
         yo = lambda p: next((y for s, y in reversed(years) if s <= p), None)  # noqa: E731
         found += meetings(t, yo)
+        for (s0, y), nxt in zip(years, years[1:] + [(len(t), None)]):
+            texts[y] = t[s0:nxt[0]]
     for y in range(a.first, a.last + 1):
         page = get(HIST.format(y))
         if page:
             t = text_of(page)
+            texts.setdefault(y, t)
             found += meetings(t, lambda p, y=y: y)
     fed = pd.DataFrame(found)
     if fed.empty:
@@ -92,6 +97,10 @@ def main():
     m = mine.merge(sched, on="date", how="outer", suffixes=("", "_fed"), indicator=True)
     print(f"연준 페이지에서 찾은 회의 {len(fed)}개 (임시 {int(fed.unscheduled.sum())}개), 표 {len(mine)}개")
     print("표에만 있음:", ", ".join(str(d) for d in m[m._merge == "left_only"].date) or "없음")
+    for d in m[m._merge == "left_only"].date:  # 왜 못 찾았는지 보려고 페이지 글을 조금 보여준다
+        t = texts.get(d.year, "")
+        hits = [t[max(0, x.start() - 30): x.start() + 90] for x in re.finditer(pd.Timestamp(d).strftime("%B"), t)][:2]
+        print(f"  {d} 페이지 글:", " || ".join(hits) or "(그 해 페이지 없음)")
     print("연준에만 있음(정례로 보임):", ", ".join(str(d) for d in m[m._merge == "right_only"].date) or "없음")
     both = m[m._merge == "both"]
     diff = both[both.presser.astype(bool) != both.presser_fed.astype(bool)]

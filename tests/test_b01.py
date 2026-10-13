@@ -193,3 +193,11 @@ def test_b07_fomc_window():
     assert b07.busiest_minute(day) == 271
     assert b07.price_before(day, 271) == c[270]
     assert b07.window(dict(mi=mi[:200], o=o[:200], c=c[:200], v=v[:200]), 265, 325) is None
+
+
+def test_b07_spike():
+    from daytrade import b07
+    mi = np.arange(390)
+    v = np.full(390, 100.0); v[271] = 900.0
+    day = dict(mi=mi, v=v)
+    assert b07.spike(day, 270) == 9.0 and b07.spike(day, 180) == 1.0
