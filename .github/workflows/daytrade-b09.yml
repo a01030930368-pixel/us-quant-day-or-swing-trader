@@ -1,0 +1,87 @@
+# 데이트레이딩 규칙서 b09 백테스트 (장중 급락 반등 "투매 V자")
+# 1) prep: 해마다 월 파일을 받아 전날 저가 아래로 시작한 종목-날짜의 정규장 1분봉과 전 종목 일봉을 뽑는다. 캐시에 남긴다.
+# 1-2) sec: SEC 공시에서 실적 발표(8-K 2.02) 시각을 모은다 (회사 주식 구분과 F5에 필요).
+# 2) backtest: F1~F7을 계산한다. 결과는 Summary와 첨부파일(b09-report)에 남는다.
+name: daytrade-b09
+on:
+  push:
+    branches: [claude/daytrade-b01-8wz04e]
+    paths: [daytrade/prep_b09.py, daytrade/b09.py, daytrade/sec_earnings.py, scripts/run_b09.py, .github/workflows/daytrade-b09.yml]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q tests
+  prep:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 9
+      matrix:
+        year: [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: prep_b09
+          key: b09-prep-${{ matrix.year }}-${{ hashFiles('daytrade/prep.py', 'daytrade/prep_b03.py', 'daytrade/prep_b04.py', 'daytrade/prep_b09.py') }}
+      - uses: actions/setup-python@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.12"
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: pip install -r requirements.txt
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: python daytrade/prep_b09.py --year ${{ matrix.year }} --out prep_b09
+      - run: ls -la prep_b09
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b09-prep-${{ matrix.year }}
+          path: prep_b09
+          retention-days: 7
+  sec:
+    needs: test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python daytrade/sec_earnings.py --out sec/earnings.parquet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b09-prep-sec
+          path: sec
+          retention-days: 7
+  backtest:
+    needs: [prep, sec]
+    if: ${{ !cancelled() && needs.prep.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: b09-prep-*
+          path: prep_b09
+          merge-multiple: true
+      - run: python scripts/run_b09.py --prep prep_b09 --out reports/b09
+      - run: cat reports/b09/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b09-report
+          path: reports/b09

@@ -222,3 +222,28 @@ def test_b08_ipo_first_day():
     assert b08.trade(dict(day, mi=mi + 200)) is None                # 15:00 넘어 첫 거래
     assert b08.is_spac_like("ABCDU", day) and b08.is_spac_like("AB.WS", day) and not b08.is_spac_like("ABNB", day)
     assert abs(b08.dv60(day) - (21 + 59 * 22) * 1e4) < 1e-6
+
+
+def test_b09_crash_rebound():
+    from daytrade import b09
+    mi = np.arange(390)
+    c = np.full(390, 95.0)
+    c[10:40] = np.linspace(95, 85, 30)                  # 9:40~10:09 급락, 저가 84.9 (10:09)
+    c[40:60] = 85.5                                     # 바닥 다지기
+    c[60:65] = 88.0                                     # 10:30~10:34 5분봉이 직전 3개 고가(85.6)를 넘음
+    c[65:] = 90.0
+    o = c.copy(); h = c + 0.1; l = c - 0.1
+    o[65] = 88.5
+    day = dict(mi=mi, o=o, h=h, l=l, c=c, v=np.full(390, 1000.0))
+    assert b09.hit_index(day, 100.0, 0.10) == 25         # 저가 89.9 이하가 처음 나온 봉
+    t = b09.confirmed(day, 100.0)
+    assert t["entry_mi"] == 65 and t["entry_px"] == 88.5 and t["reason"] == "마감"
+    assert abs(t["stop_dist"] - (88.5 - 84.9) / 88.5) < 1e-9 and abs(t["gross"] - (90 / 88.5 - 1)) < 1e-12
+    t = b09.confirmed(day, 100.0, until=30)              # 120분 대신 30분 뒤 청산
+    assert t["exit_mi"] == 95
+    assert b09.confirmed(day, 100.0, thr=0.20) is None
+    t = b09.at_touch(day, 100.0)
+    assert t["entry_px"] == o[25] and abs(t["gross"] - (90 / o[25] - 1)) < 1e-12   # 그 봉 시가가 이미 90 아래
+    l2 = l.copy(); l2[100] = 84.0                         # 매수 뒤 저가 아래로 -> 손절
+    t = b09.confirmed(dict(day, l=l2), 100.0)
+    assert t["reason"] == "손절" and abs(t["exit_px"] - 84.9) < 1e-9
