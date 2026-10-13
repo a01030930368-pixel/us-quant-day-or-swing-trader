@@ -96,8 +96,12 @@ jobs:
         run: >
           python scripts/run_backtest.py --set chartdoc --universe sp1500 --start ${{ inputs.start || '2010-01-01' }}
           --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '25' }}
+      - name: 유튜브 벨레즈 3연속 음봉 눌림 + 전봉 고가 돌파 (S&P 1500)
+        run: >
+          python scripts/run_backtest.py --set velez --universe sp1500 --start ${{ inputs.start || '2010-01-01' }}
+          --split ${{ inputs.split || '2018-01-01' }} --cost-bps ${{ inputs.cost_bps || '25' }}
       - run: >
-          cat reports/swing_report_chartdoc_sp1500.md reports/swing_report_ptj_sp1500.md reports/swing_report_pullback_yt_sp1500.md reports/swing_report_sewer_sp1500.md reports/swing_report_sewer_small.md reports/swing_report_blend_sp1500.md reports/swing_report_insider_sp1500.md reports/swing_report_announce_sp1500.md reports/swing_report_quality_sp1500.md reports/swing_report_reversion_sp1500.md reports/swing_report_pead_sp1500.md reports/swing_report_large.md reports/swing_report_all.md
+          cat reports/swing_report_velez_sp1500.md reports/swing_report_chartdoc_sp1500.md reports/swing_report_ptj_sp1500.md reports/swing_report_pullback_yt_sp1500.md reports/swing_report_sewer_sp1500.md reports/swing_report_sewer_small.md reports/swing_report_blend_sp1500.md reports/swing_report_insider_sp1500.md reports/swing_report_announce_sp1500.md reports/swing_report_quality_sp1500.md reports/swing_report_reversion_sp1500.md reports/swing_report_pead_sp1500.md reports/swing_report_large.md reports/swing_report_all.md
           reports/swing_report_legends2_all.md reports/swing_report_refine_all.md
           reports/swing_report_legends_all_small.md reports/swing_report_earnings_all.md
           reports/swing_report_earnings_wide_sp1500.md >> "$GITHUB_STEP_SUMMARY"
