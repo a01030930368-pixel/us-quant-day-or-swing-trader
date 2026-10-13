@@ -114,3 +114,29 @@ def test_b03_gap_and_go():
     assert t["reason"].startswith("절반 익절") and abs(t["gross"] - (0.5 * (11.22 / 10.6 - 1) + 0.5 * (10.8 / 10.6 - 1))) < 1e-9
     t = b03.open_buy(day, pm_low=10.2)
     assert t["entry_px"] == 10.8 and t["entry_mi"] == 1
+
+
+def test_b04_episodic_pivot_entry_volume_and_swing():
+    from daytrade import b04
+    n = 390
+    mi = np.arange(n)
+    o = np.full(n, 11.0); h = np.full(n, 11.1); l = np.full(n, 10.9); c = np.full(n, 11.0); v = np.full(n, 1000.0)
+    o[0], h[0], l[0], c[0] = 10.5, 10.8, 10.4, 10.7   # 첫 1분봉 고가 10.8, 저가 10.4
+    o[1], h[1], l[1] = 10.7, 10.9, 10.6               # 9:31에 10.8 돌파
+    v[0] = 20000.0
+    day = dict(mi=mi, o=o, h=h, l=l, c=c, v=v)
+    # 평소 하루 20만 주, 기준 50% -> 20분에 10만 주 속도: 1분 지났으면 5천 주 필요, 첫 1분봉 2만 주라 통과
+    i, px, stop = b04.find_entry(day, 1, 200000, 0.5, adr=0.05)
+    assert (i, px, round(stop, 2)) == (1, 10.8, 10.39)
+    # 기준 100%로 올리고 첫 봉 거래량을 줄이면 9:50 전엔 속도 미달 -> 9:50 이후 9:30~9:50 합계(19만 9천+)도 미달 -> 없음
+    v2 = v.copy(); v2[0] = 1000.0
+    assert b04.find_entry(dict(day, v=v2), 1, 200000, 1.0, adr=0.05) is None
+    assert b04.find_entry(day, 1, 200000, 0.5, adr=0.01) is None  # 손절폭 3.8% > 1.5 x 1%
+    t = b04.intraday(day, 1, 200000, 0.5, 0.05)
+    assert t["reason"] == "마감" and abs(t["gross"] - (11.0 / 10.8 - 1)) < 1e-12
+    # E7: 2일째 12, 3일째 13에 절반 매도·손절 본전, 4일째 10.5로 시가 하락 -> 시가가 본전(10.8) 아래라 시가에 나머지 매도
+    nxt = dict(o=np.array([11.5, 12.5, 10.5]), h=np.array([12.1, 13.1, 10.6]), l=np.array([11.4, 12.4, 10.4]),
+               c=np.array([12.0, 13.0, 10.5]))
+    t = b04.swing(day, i, px, stop, np.full(9, 10.0), nxt)
+    assert t["days"] == 4 and t["reason"] == "절반 후 본전 손절"
+    assert abs(t["gross"] - (0.5 * (13 / 10.8 - 1) + 0.5 * (10.5 / 10.8 - 1))) < 1e-12
