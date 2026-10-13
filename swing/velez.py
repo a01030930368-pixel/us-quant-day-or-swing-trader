@@ -145,6 +145,7 @@ class VelezV1(Strategy):
     top_n = TOP_N
     ma_reentry = False                    # V3
     regime = None                         # "bull" / "bear": buy only in that market
+    entry_day_stop = True                 # False: no stop on the buy day (the optimistic bound)
 
     def _prepare(self) -> None:
         t = self.tradable
@@ -203,13 +204,15 @@ class VelezV1(Strategy):
                          "wide": (price - stop) / price > WIDE_RISK}
         return True
 
-    def initial_stop(self, t: str, i: int, price: float) -> float:
-        return self.trade[t]["stop"]
+    def initial_stop(self, t: str, i: int, price: float) -> float | None:
+        # The engine checks the stop on the buy day too. For a buy-stop that is cautious: a day that
+        # dips under the prior low and then breaks the prior high counts as stopped out.
+        return self.trade[t]["stop"] if self.entry_day_stop else None
 
     def update_stop(self, pos: dict, i: int) -> float | None:
         t = pos["ticker"]
         tr = self.trade[t]
-        stop = pos["stop"]
+        stop = tr["stop"] if pos["stop"] is None else pos["stop"]
         if tr["wide"] and i == pos["entry_i"]:
             stop = max(stop, self.l[t].iloc[i] - TICK)       # too far: under the buy candle's low
             tr["R"] = tr["entry"] - stop
@@ -227,7 +230,7 @@ class VelezV1(Strategy):
             target = tr["entry"] + self.tp1 * tr["R"]
             if hi >= target:
                 tr["half"] = True
-                pos["stop"] = max(pos["stop"], target if self.protect else tr["entry"])
+                pos["stop"] = max(pos["stop"] or 0.0, target if self.protect else tr["entry"])
             return target, 0.5, f"{self.tp1:g}R 절반 익절"
         if self.ma_exit:
             return None
@@ -307,6 +310,8 @@ SWEEP = [_sweep(VelezV1, "rise", 0.10, "상승 기준 10%"), _sweep(VelezV1, "ri
          _sweep(VelezV1, "tp1", 1.5, "익절 1.5R 절반·3R 나머지"),
          _sweep(VelezV2, "top_n", 5, "상위 5종목"), _sweep(VelezV2, "top_n", 10, "상위 10종목"),
          _sweep(VelezV1, "regime", "bull", "강세장(S&P500 200일선 위)에서만 매수"),
-         _sweep(VelezV1, "regime", "bear", "약세장(S&P500 200일선 아래)에서만 매수")]
+         _sweep(VelezV1, "regime", "bear", "약세장(S&P500 200일선 아래)에서만 매수"),
+         _sweep(VelezV1, "entry_day_stop", False, "매수 당일 손절 안 봄(낙관적 상한)"),
+         _sweep(VelezV2, "entry_day_stop", False, "매수 당일 손절 안 봄(낙관적 상한)")]
 SWEEP[3].name += "_2r"
 VELEZ = [VelezV1, VelezV2, VelezV3, VelezV4, VelezV5, VelezV6, *SWEEP]
