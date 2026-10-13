@@ -95,3 +95,22 @@ def test_b02_orb_entry_stop_and_close():
     assert t["reason"] == "손절" and abs(t["gross"] - (-0.1 / 10.5)) < 1e-12
     c[4] = 9.95  # 음봉 범위
     assert b02.trade(day, 5, "range") is None
+
+
+def test_b03_gap_and_go():
+    from daytrade import b03
+    n = 390
+    mi = np.arange(n)
+    o = np.full(n, 10.8); h = np.full(n, 10.9); l = np.full(n, 10.7); c = np.full(n, 10.8)
+    h[:15], l[:15] = 10.6, 10.3   # 첫 15분 범위 10.3~10.6, 전날 종가 10.0 (갭 유지)
+    o[15], h[15] = 10.5, 10.9     # 9:45 1분봉이 10.6을 넘음 -> 10.6에 매수
+    day = dict(mi=mi, o=o, h=h, l=l, c=c)
+    t = b03.range_breakout(day, 15, pc=10.0)
+    assert t["entry_mi"] == 15 and t["entry_px"] == 10.6 and t["reason"] == "마감"
+    assert abs(t["gross"] - (10.8 / 10.6 - 1)) < 1e-12
+    assert b03.range_breakout(day, 15, pc=10.35) is None  # 범위 저가 10.3이 전날 종가 아래 -> 갭 메워짐
+    h2 = h.copy(); h2[100] = 11.5  # 2R = 10.6 + 2 x 0.31 = 11.22 도달
+    t = b03.range_breakout(dict(day, h=h2), 15, pc=10.0, half_r=2.0)
+    assert t["reason"].startswith("절반 익절") and abs(t["gross"] - (0.5 * (11.22 / 10.6 - 1) + 0.5 * (10.8 / 10.6 - 1))) < 1e-9
+    t = b03.open_buy(day, pm_low=10.2)
+    assert t["entry_px"] == 10.8 and t["entry_mi"] == 1
