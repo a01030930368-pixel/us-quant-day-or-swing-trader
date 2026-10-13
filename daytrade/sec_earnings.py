@@ -2,10 +2,9 @@
 
 SEC가 무료로 주는 전체 공시 목록(submissions.zip)에서, 지금 상장된 회사(company_tickers.json)의
 8-K 중 항목에 2.02(실적 발표)가 있는 것의 접수 시각을 뽑는다. 상장폐지된 회사는 빠진다(한계).
--> earnings.parquet (ticker, accepted: 미국 동부시간 기준 접수 시각)
+-> earnings.parquet (ticker, accepted: 미국 동부시간 접수 시각)
 """
 import argparse
-import io
 import json
 import os
 import time
@@ -70,8 +69,9 @@ def main():
             block = j.get("filings", {}).get("recent", j)  # 본 파일은 filings.recent, 추가 쪽 파일은 바로 목록
             rows += rows_from(block, cik_tickers[cik])
     df = pd.DataFrame(rows, columns=["ticker", "acc"]).drop_duplicates()
-    # acceptanceDateTime은 끝에 Z가 붙어 있지만 EDGAR 접수 시각(동부시간)으로 본다. 아래 시각 분포로 확인
-    df["accepted"] = pd.to_datetime(df.acc.str.slice(0, 19))
+    df = df[~df.acc.str.contains("T00:00:00")]  # 시각 없이 날짜만 있는 옛 공시는 뺌
+    # acceptanceDateTime은 세계표준시(UTC). 동부시간으로 바꾼다 (시각 분포가 장 마감 직후·장 전에 몰리는지로 확인)
+    df["accepted"] = (pd.to_datetime(df.acc, utc=True).dt.tz_convert("America/New_York").dt.tz_localize(None))
     print("8-K 2.02 filings", len(df), "tickers", df.ticker.nunique(), flush=True)
     print("hour histogram:\n", df.accepted.dt.hour.value_counts().sort_index().to_string(), flush=True)
     df[["ticker", "accepted"]].to_parquet(a.out)
