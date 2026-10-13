@@ -51,6 +51,7 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
     first = 0 if start is None else int(dates.searchsorted(pd.Timestamp(start)))
     cost = cost_bps / 10_000
     n_max = strategy.max_positions
+    strategy.begin()
 
     cash = 1.0
     positions: dict[str, dict] = {}
@@ -78,22 +79,24 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
                        "exit_price": price, "return": net,
                        "days": i - pos["entry_i"] + 1, "reason": reason, "part": part,
                        "weight": pos["weight"]})
+        strategy.on_close(trades[-1], i)
 
-    def add_to(t: str, i: int, w) -> None:
+    def add_to(t: str, i: int, w, at: float | None = None) -> None:
         """Add to an open position at day i's open, or at a limit price during the day.
 
         `w` is a share of the account, or (share, limit) for a buy limit: filled
         at the open if the stock opens at or below the limit, at the limit if
         the low reaches it, else not at all (the order expires that day).
+        `at` fills at that price instead (a buy at the close).
         """
         nonlocal cash
         limit = None
         if isinstance(w, tuple):
             w, limit = w
-        px = o[t].iloc[i]
+        px = o[t].iloc[i] if at is None else at
         if t not in positions or pd.isna(px) or px <= 0:
             return
-        if limit is not None:
+        if limit is not None and at is None:
             if px > limit:
                 if pd.isna(l[t].iloc[i]) or l[t].iloc[i] > limit:
                     return
@@ -135,17 +138,16 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
             positions[t] = {"ticker": t, "shares": spend / px, "initial_shares": spend / px,
                             "entry_price": px, "entry_i": i, "high_close": px, "high_max": px,
                             "weight": spend / prev_equity,
-                            "stop": strategy.initial_stop(t, i, px)}
+                            "stop": strategy.initial_stop(t, i, px),
+                            "before_open": strategy.bought_before_open(t)}
             cash -= spend * (1 + cost)
-            if getattr(strategy, "close_fill", False):
-                # Bought at yesterday's close, so an add order placed then works today too.
+            if positions[t]["before_open"] or getattr(strategy, "same_day_adds", False):
+                # The buy order was placed at yesterday's close, so an add order placed
+                # with it works today too.
                 add = strategy.add_weight(positions[t], i - 1)
                 if add:
                     add_to(t, i, add)
         pending_buys = []
-
-        # A strategy that buys at the previous close already holds the stock at today's open.
-        close_fill = getattr(strategy, "close_fill", False)
 
         # 2a. Sells at today's open decided by the open itself (e.g. a gap down).
         for t in list(positions):
@@ -161,7 +163,7 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
             lo, op = l[t].iloc[i], o[t].iloc[i]
             if stop is None or pd.isna(lo):
                 continue
-            if (positions[t]["entry_i"] < i or close_fill) and op <= stop:
+            if (positions[t]["entry_i"] < i or positions[t]["before_open"]) and op <= stop:
                 close_trade(t, i, op, "손절 (갭 하락)")
             elif lo <= stop:
                 close_trade(t, i, stop, "손절")
@@ -178,7 +180,7 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
                 continue
             target, frac, reason = tp
             if hi >= target:
-                fill = op if (pos["entry_i"] < i or close_fill) and op > target else target
+                fill = op if (pos["entry_i"] < i or pos["before_open"]) and op > target else target
                 close_trade(t, i, fill, reason, frac)
 
         # 2c. Sells at today's close decided by the strategy (e.g. "sell on the third day's close").
@@ -188,6 +190,10 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
                 reason = strategy.close_exit(positions[t], i)
                 if reason:
                     close_trade(t, i, px, reason)
+                    continue
+                w = strategy.close_add(positions[t], i)
+                if w:
+                    add_to(t, i, w, at=px)
 
         # 3. Close: value the account, then plan tomorrow.
         value = cash + sum(p["shares"] * last_close[t].iloc[i] for t, p in positions.items())
