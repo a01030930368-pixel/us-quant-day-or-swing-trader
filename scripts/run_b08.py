@@ -52,36 +52,12 @@ def find_ipos(tick, bars, cal):
     return cand, gone
 
 
-def stats_row(name, s, judge=True):
-    if s.empty:
-        return f"| {name} | 0 |" + " |" * 9, False
-    g = s.gross
-    t = g.mean() / (g.std(ddof=1) / np.sqrt(len(g))) if len(g) > 1 and g.std() > 0 else np.nan
-    n1, n2 = portfolio.net_return(g, FEE + SLIP), portfolio.net_return(g, FEE + SLIP_LOW)
-    ok = judge and g.mean() >= GATE and len(g) >= MIN_N
-    verdict = ("통과" if ok else ("탈락" if len(g) >= MIN_N else "신호 부족")) if judge else "(판정 안 함)"
-    return (f"| {name} | {len(g)} | {g.mean() * 100:.2f}% | {g.median() * 100:.2f}% | {(g > 0).mean():.0%} | {t:.2f} | "
-            f"{n1.mean() * 100:.2f}% | {n2.mean() * 100:.2f}% | {(n1 > 0).mean():.0%} | {(s.reason == '손절').sum()} | {verdict} |"), ok
-
-
-HEAD = ("| 변형 | IPO 수 | 비용 전 평균 | 비용 전 중앙값 | 비용 전 승률 | t값 | 비용 후 평균 (왕복 0.9%) | 비용 후 (왕복 0.7%) | "
-        "비용 후 승률 | 손절 | 관문 |", "|---|---|---|---|---|---|---|---|---|---|---|")
-
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--prep", default="prep_b08")
-    ap.add_argument("--out", default="reports/b08")
-    a = ap.parse_args()
-    os.makedirs(a.out, exist_ok=True)
-    tick, bars, spy = read_all(a.prep, "tick"), read_all(a.prep, "bars"), read_all(a.prep, "spy")
-    spy = spy.drop_duplicates("d").assign(d=lambda x: pd.to_datetime(x.d)).set_index("d").c.sort_index()
-    bars = bars.sort_values(["ticker", "d", "mi"])
+def ipo_days(tick, bars, spy):
+    """진짜 IPO 첫날 목록 [(ticker, d, day, dv60)]과 빠진 이유 개수, 후보 표."""
     days = {(tk, pd.Timestamp(d)): {k: g[k].to_numpy() for k in ("mi", "o", "h", "l", "c", "v")}
             for (tk, d), g in bars.groupby(["ticker", "d"], sort=False)}
     cand, gone = find_ipos(tick, bars, spy.index)
-
-    rows, drop = [], {"직전 1년 안에 거래 있음 (재등장)": 0, "코드 변경으로 보임": 0, "스팩·유닛·워런트": 0,
+    ipos, drop = [], {"직전 1년 안에 거래 있음 (재등장)": 0, "코드 변경으로 보임": 0, "스팩·유닛·워런트": 0,
                       "첫 시가 5달러 미만": 0, "자료 오류 (한 봉만 앞뒤보다 3배 넘게 튐)": 0, "첫 1시간 거래대금 1,000만 달러 미만": 0, "15:00 이후 첫 거래": 0}
     gone_by_day = {d: g for d, g in gone.groupby("last_d")}
     for r in cand.itertuples():
@@ -110,7 +86,39 @@ def main():
         if day["mi"][0] > 330:
             drop["15:00 이후 첫 거래"] += 1
             continue
-        base = dict(ticker=r.ticker, d=r.d, first_mi=int(day["mi"][0]), open0=o0, dv60=dv)
+        ipos.append((r.ticker, r.d, day, dv))
+    return ipos, drop, cand
+
+
+def stats_row(name, s, judge=True):
+    if s.empty:
+        return f"| {name} | 0 |" + " |" * 9, False
+    g = s.gross
+    t = g.mean() / (g.std(ddof=1) / np.sqrt(len(g))) if len(g) > 1 and g.std() > 0 else np.nan
+    n1, n2 = portfolio.net_return(g, FEE + SLIP), portfolio.net_return(g, FEE + SLIP_LOW)
+    ok = judge and g.mean() >= GATE and len(g) >= MIN_N
+    verdict = ("통과" if ok else ("탈락" if len(g) >= MIN_N else "신호 부족")) if judge else "(판정 안 함)"
+    return (f"| {name} | {len(g)} | {g.mean() * 100:.2f}% | {g.median() * 100:.2f}% | {(g > 0).mean():.0%} | {t:.2f} | "
+            f"{n1.mean() * 100:.2f}% | {n2.mean() * 100:.2f}% | {(n1 > 0).mean():.0%} | {(s.reason == '손절').sum()} | {verdict} |"), ok
+
+
+HEAD = ("| 변형 | IPO 수 | 비용 전 평균 | 비용 전 중앙값 | 비용 전 승률 | t값 | 비용 후 평균 (왕복 0.9%) | 비용 후 (왕복 0.7%) | "
+        "비용 후 승률 | 손절 | 관문 |", "|---|---|---|---|---|---|---|---|---|---|---|")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--prep", default="prep_b08")
+    ap.add_argument("--out", default="reports/b08")
+    a = ap.parse_args()
+    os.makedirs(a.out, exist_ok=True)
+    tick, bars, spy = read_all(a.prep, "tick"), read_all(a.prep, "bars"), read_all(a.prep, "spy")
+    spy = spy.drop_duplicates("d").assign(d=lambda x: pd.to_datetime(x.d)).set_index("d").c.sort_index()
+    bars = bars.sort_values(["ticker", "d", "mi"])
+    ipos, drop, cand = ipo_days(tick, bars, spy)
+    rows = []
+    for tk, d, day, dv in ipos:
+        base = dict(ticker=tk, d=d, first_mi=int(day["mi"][0]), open0=day["o"][0], dv60=dv)
         for code, _, kw in VARIANTS:
             t = b08.trade(day, **kw)
             if t:

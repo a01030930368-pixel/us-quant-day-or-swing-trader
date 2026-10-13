@@ -1,0 +1,156 @@
+# 데이트레이딩 규칙서 b16 (큰 IPO 첫날), b17 (IPO 둘째 날), b18 (IPO 베이스 돌파) (무료 1분봉 mito0o852/OHLCV-1m, 1992-01 ~ 2026-03).
+# 1) prep_b08: b08과 같은 자료 (캐시 그대로 씀) -> 2) ipolist: b08 방법으로 IPO 첫날 목록
+# 1-2) sec: SEC 공시로 스팩 합병·이미 공시하던 회사 구분
+# 3) prep_ipo: 상장한 해마다 상장 후 60거래일 하루 표와 둘째 날·베이스 돌파 후보일 1분봉
+# 4) backtest: 규칙서마다 따로. 결과는 Summary와 첨부파일(bNN-report)에 남는다.
+name: daytrade-ipo
+on:
+  push:
+    branches: [claude/daytrade-b01-8wz04e]
+    paths: [daytrade/prep_ipo.py, daytrade/ipo.py, daytrade/sec_filings.py, scripts/ipo_list.py, scripts/run_ipo.py, .github/workflows/daytrade-ipo.yml]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q tests
+  prep_b08:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        year: [1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: prep_b08
+          key: b08-prep-${{ matrix.year }}-${{ hashFiles('daytrade/prep.py', 'daytrade/prep_b08.py') }}
+      - uses: actions/setup-python@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.12"
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: pip install -r requirements.txt
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: python daytrade/prep_b08.py --year ${{ matrix.year }} --out prep_b08
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b08-prep-${{ matrix.year }}
+          path: prep_b08
+          retention-days: 7
+  sec:
+    needs: test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python daytrade/sec_filings.py --out sec
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipo-sec
+          path: sec
+          retention-days: 7
+  ipolist:
+    needs: prep_b08
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: b08-prep-*
+          path: prep_b08
+          merge-multiple: true
+      - run: python scripts/ipo_list.py --prep prep_b08 --out ipo/ipos.parquet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipo-list
+          path: ipo
+          retention-days: 7
+  prep_ipo:
+    needs: ipolist
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 17
+      matrix:
+        year: [1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ipo-list
+          path: ipo
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: prep_ipo
+          key: ipo-prep-${{ matrix.year }}-${{ hashFiles('daytrade/prep.py', 'daytrade/prep_ipo.py', 'ipo/ipos.parquet') }}
+      - uses: actions/setup-python@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.12"
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: pip install -r requirements.txt
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: python daytrade/prep_ipo.py --year ${{ matrix.year }} --ipos ipo/ipos.parquet --out prep_ipo
+      - run: ls -la prep_ipo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipo-prep-${{ matrix.year }}
+          path: prep_ipo
+          retention-days: 7
+  backtest:
+    needs: [prep_b08, sec, prep_ipo]
+    if: ${{ !cancelled() && needs.prep_ipo.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        rule: [b16, b17, b18]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: b08-prep-*
+          path: prep_b08
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ipo-prep-*
+          path: prep_ipo
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: ipo-sec
+          path: sec
+      - run: python scripts/run_ipo.py --b08 prep_b08 --ipo prep_ipo --sec sec --rule ${{ matrix.rule }} --out reports/${{ matrix.rule }}
+      - run: cat reports/${{ matrix.rule }}/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rule }}-report
+          path: reports/${{ matrix.rule }}
