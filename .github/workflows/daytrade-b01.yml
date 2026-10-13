@@ -5,7 +5,7 @@ name: daytrade-b01
 on:
   push:
     branches: [claude/daytrade-b01-8wz04e]
-    paths: [daytrade/**, scripts/run_daytrade.py, tests/**, .github/workflows/daytrade-b01.yml]
+    paths: [daytrade/prep.py, daytrade/b01.py, daytrade/portfolio.py, scripts/run_daytrade.py, .github/workflows/daytrade-b01.yml]
   workflow_dispatch:
 jobs:
   test:

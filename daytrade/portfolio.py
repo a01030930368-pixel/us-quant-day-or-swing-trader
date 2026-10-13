@@ -17,11 +17,11 @@ def net_return(gross, cost):
     return (1 + gross) * (1 - cost) / (1 + cost) - 1
 
 
-def daily_returns(trades, days, cost):
+def daily_returns(trades, days, cost, max_w=MAX_W, max_pos=MAX_POS):
     """trades: DataFrame(d, entry_mi, exit_mi, gross, stop_dist, rank). 하루 수익률 Series와 실제 체결된 거래."""
     t = trades.copy()
     t["net"] = net_return(t.gross, cost)
-    t["w"] = np.minimum(RISK / t.stop_dist.clip(lower=1e-4), MAX_W)
+    t["w"] = np.minimum(RISK / t.stop_dist.clip(lower=1e-4), max_w)
     taken = []
     for d, g in t.sort_values(["d", "entry_mi", "rank"]).groupby("d", sort=False):
         held = []  # (exit_mi, pnl)
@@ -29,7 +29,7 @@ def daily_returns(trades, days, cost):
             done = sum(p for x, p in held if x <= r.entry_mi)
             if done <= DAY_STOP:
                 break
-            if sum(1 for x, _ in held if x > r.entry_mi) >= MAX_POS:
+            if sum(1 for x, _ in held if x > r.entry_mi) >= max_pos:
                 continue
             held.append((r.exit_mi, r.w * r.net))
             taken.append(r.Index)

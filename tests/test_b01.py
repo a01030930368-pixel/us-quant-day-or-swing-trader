@@ -79,3 +79,19 @@ def test_portfolio_limits():
     ret, k = portfolio.daily_returns(tr, days, 0.0)
     assert len(k) == 3  # 동시 보유 3종목
     assert abs(ret.iloc[0] - 3 * 0.25 * 0.03) < 1e-12 and ret.iloc[1] == 0
+
+
+def test_b02_orb_entry_stop_and_close():
+    from daytrade import b02
+    n = 390
+    mi = np.arange(n)
+    o = np.full(n, 10.5); h = np.full(n, 10.6); l = np.full(n, 10.4); c = np.full(n, 10.5)
+    o[0], c[4], h[:5], l[:5] = 10.0, 10.4, 10.45, 9.9   # 첫 5분: 10.0 -> 10.4 양봉, 고가 10.45 저가 9.9
+    day = dict(mi=mi, o=o, h=h, l=l, c=c)
+    t = b02.trade(day, 5, "range")
+    assert t["entry_mi"] == 5 and t["entry_px"] == 10.5  # 6번째 1분봉이 시가 10.5로 갭 -> 시가 체결
+    assert t["reason"] == "마감" and t["exit_mi"] == 385 and abs(t["gross"]) < 1e-12
+    t = b02.trade(day, 5, "atr", atr=1.0)  # 손절 10.5 - 0.1 = 10.4 -> 첫 1분봉 저가 10.4에 닿음
+    assert t["reason"] == "손절" and abs(t["gross"] - (-0.1 / 10.5)) < 1e-12
+    c[4] = 9.95  # 음봉 범위
+    assert b02.trade(day, 5, "range") is None
