@@ -37,6 +37,7 @@ from swing.namsg import NAMSG  # noqa: E402
 from swing.jongga import JONGGA  # noqa: E402
 from swing.trendjb import TREND  # noqa: E402
 from swing.split7 import SPLIT  # noqa: E402
+from swing.canslim import CANSLIM, market_5day, market_oneil, quality_flags  # noqa: E402
 from swing.pead import HOLD_DAYS, PEAD, PEAD_SET, SUE_MIN, sue_table  # noqa: E402
 from swing.strategies import ALL, MomentumSwing  # noqa: E402
 
@@ -59,12 +60,13 @@ TITLES = {"legends": "전설 1그룹 규칙", "legends2": "전설 2그룹 규칙
           "jongga": "유튜브 종가배팅 모음 (규칙서 08)",
           "trend": "유튜브 추세 종배 200일선 위 첫 장대양봉 (규칙서 09)",
           "split7": "유튜브 세븐 스플릿 + 엔벨로프 하단 분할 매수 (규칙서 10)",
+          "canslim": "유튜브 캔슬림 시장 반전 박스권 돌파 (규칙서 11)",
           "blend": "여러 전략 합치기"}
 SETS = {"legends": LEGENDS, "legends2": LEGENDS2, "round2": ALL, "refine": REFINED,
-        "legends_all": LEGENDS + LEGENDS2, "earnings": EARNINGS, "earnings_wide": WIDE, "pead": PEAD_SET, "reversion": REVERSION, "quality": QUALITY, "announce": ANNOUNCE, "insider": INSIDER, "sewer": SEWER, "pullback_yt": PULLBACK_YT, "ptj": PTJ, "chartdoc": CHARTDOC, "velez": VELEZ, "gojiro": GOJIRO, "hong": HONG, "namsg": NAMSG, "jongga": JONGGA, "trend": TREND, "split7": SPLIT,
+        "legends_all": LEGENDS + LEGENDS2, "earnings": EARNINGS, "earnings_wide": WIDE, "pead": PEAD_SET, "reversion": REVERSION, "quality": QUALITY, "announce": ANNOUNCE, "insider": INSIDER, "sewer": SEWER, "pullback_yt": PULLBACK_YT, "ptj": PTJ, "chartdoc": CHARTDOC, "velez": VELEZ, "gojiro": GOJIRO, "hong": HONG, "namsg": NAMSG, "jongga": JONGGA, "trend": TREND, "split7": SPLIT, "canslim": CANSLIM,
         "blend": [GrossProfitability, PEAD, InsiderDollar, MomentumSwing]}
 RULE_CHAPTERS = {"legends": "12장", "legends2": "14장", "refine": "12·14장",
-                 "legends_all": "12·14장", "earnings": "12·14·17장", "earnings_wide": "12·14·17장", "pead": "19장", "reversion": "20장", "quality": "19·22장", "announce": "19·23장", "insider": "24장", "blend": "19·22·24·25장", "sewer": "26장", "pullback_yt": "27장", "ptj": "28장", "chartdoc": "29장", "velez": "30장", "gojiro": "31장", "hong": "32장", "namsg": "33장", "jongga": "34장", "trend": "35장", "split7": "36장"}
+                 "legends_all": "12·14장", "earnings": "12·14·17장", "earnings_wide": "12·14·17장", "pead": "19장", "reversion": "20장", "quality": "19·22장", "announce": "19·23장", "insider": "24장", "blend": "19·22·24·25장", "sewer": "26장", "pullback_yt": "27장", "ptj": "28장", "chartdoc": "29장", "velez": "30장", "gojiro": "31장", "hong": "32장", "namsg": "33장", "jongga": "34장", "trend": "35장", "split7": "36장", "canslim": "37장"}
 from swing.universe import MARKET, UNIVERSE_LABELS, tickers  # noqa: E402
 
 
@@ -146,7 +148,7 @@ def main() -> None:
     ap.add_argument("--universe", default="large", choices=sorted(UNIVERSE_LABELS),
                     help="large: 대형주, all: 대형주 + 중형주, small: 소형주, every: 전부, sp1500: S&P 1500")
     ap.add_argument("--set", default="legends", choices=sorted(SETS),
-                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교, earnings_wide: 오닐·미너비니 + 실적(넓은 종목용), pead: 실적 서프라이즈 후 추세, reversion: 단기 과매도 반등, quality: 총이익률 장기 보유, announce: 실적 발표일 기준 서프라이즈, insider: 내부자 매수 따라가기, blend: 여러 전략 합치기, sewer: 하수구 돌파(200일선 두 번째 돌파), pullback_yt: 유튜브 눌림목 매매(규칙서 01), ptj: 유튜브 폴 튜더 존스식 변곡점 돌파(규칙서 02), chartdoc: 유튜브 차트박사 신고가 + 20일선 눌림 + 5일선 돌파(규칙서 03), velez: 유튜브 벨레즈 3연속 음봉 눌림 + 전봉 고가 돌파(규칙서 04), gojiro: 유튜브 고지로 이동평균선 대순환 + 쿨라매기 돌파(규칙서 05), hong: 유튜브 홍인기 주도주 첫 장대양봉(규칙서 06), namsg: 유튜브 남석관 장대양봉 후 첫 5일선(규칙서 07), jongga: 유튜브 종가배팅 모음(규칙서 08), trend: 유튜브 추세 종배(규칙서 09), split7: 유튜브 세븐 스플릿 + 엔벨로프 하단(규칙서 10)")
+                    help="legends: 전설 1그룹(와인스타인·미너비니·본드·오닐), legends2: 2그룹(다바스·쿨라매기·래쉬키·켈), round2: 1·2차 후보, refine: 와인스타인·다바스 다듬기, legends_all: 1·2그룹 전부, earnings: 실적 조건 비교, earnings_wide: 오닐·미너비니 + 실적(넓은 종목용), pead: 실적 서프라이즈 후 추세, reversion: 단기 과매도 반등, quality: 총이익률 장기 보유, announce: 실적 발표일 기준 서프라이즈, insider: 내부자 매수 따라가기, blend: 여러 전략 합치기, sewer: 하수구 돌파(200일선 두 번째 돌파), pullback_yt: 유튜브 눌림목 매매(규칙서 01), ptj: 유튜브 폴 튜더 존스식 변곡점 돌파(규칙서 02), chartdoc: 유튜브 차트박사 신고가 + 20일선 눌림 + 5일선 돌파(규칙서 03), velez: 유튜브 벨레즈 3연속 음봉 눌림 + 전봉 고가 돌파(규칙서 04), gojiro: 유튜브 고지로 이동평균선 대순환 + 쿨라매기 돌파(규칙서 05), hong: 유튜브 홍인기 주도주 첫 장대양봉(규칙서 06), namsg: 유튜브 남석관 장대양봉 후 첫 5일선(규칙서 07), jongga: 유튜브 종가배팅 모음(규칙서 08), trend: 유튜브 추세 종배(규칙서 09), split7: 유튜브 세븐 스플릿 + 엔벨로프 하단(규칙서 10), canslim: 유튜브 캔슬림 시장 반전 박스권 돌파(규칙서 11)")
     ap.add_argument("--low-cost-bps", type=float, default=None,
                     help="이 비용(편도 bp)으로도 다시 계산해 표를 덧붙임 (예: 키움 이벤트 수수료 7)")
     ap.add_argument("--out", default="reports")
@@ -158,7 +160,7 @@ def main() -> None:
     universe = [t for t in data["Close"].columns if t != MARKET]
 
     earn_lines = []
-    if args.set in ("earnings", "earnings_wide", "ptj", "namsg", "trend"):
+    if args.set in ("earnings", "earnings_wide", "ptj", "namsg", "trend", "canslim"):
         lim = {"ptj": (0.20, 0.20), "namsg": (1e-9, 1e-9), "trend": (1e-9, 1e-9)}.get(args.set, (EPS_MIN, SALES_MIN))  # rulebook 02: +20%, 07: any growth
         flags, cover = growth_flags(load_facts(universe), data["Close"].index, *lim)
         if cover["eps"] == 0:
@@ -244,7 +246,32 @@ def main() -> None:
             f"{(sue[since] >= SUE_MIN).sum().sum() / max(sue[since].notna().sum().sum(), 1) * 100:.0f}%)",
             f"- 보유 기간은 {HOLD_DAYS}거래일(약 3개월)로 고정입니다.",
         ]
-    if args.set in ("hong", "namsg", "jongga", "trend", "split7"):
+    if args.set == "canslim":
+        idx = data["Close"].index
+        qual, qcovered = quality_flags(load_facts(universe), idx)
+        data["QualOK"] = qual
+        since = idx >= pd.Timestamp(args.start)
+        both = (qual & data["EarnOK"].reindex(columns=qual.columns).fillna(False))[since]
+        try:
+            vix = load_ohlc(["^VIX"], start=warmup)["Close"]["^VIX"]
+            data["VIX"] = vix
+            vix_line = f"- VIX: 야후 ^VIX 종가. 25를 넘은 날 {(vix[vix.index >= pd.Timestamp(args.start)] > 25).mean() * 100:.0f}%."
+        except Exception as e:                       # the -5% stop is then never used
+            vix_line = f"- VIX를 받지 못해 손절은 늘 -7%입니다 ({e})."
+        mk = [data[f][MARKET].to_numpy(float) for f in ("Open", "High", "Low", "Close", "Volume")]
+        years = since.sum() / 252
+        turns = {}
+        for name, (_, up, dn) in {"지수 5일선(M1)": market_5day(*mk), "5일선 하루(M1d)": market_5day(*mk, quick=True),
+                                  "오닐(M2)": market_oneil(*mk)}.items():
+            up = [i for i in up if since[i]]
+            turns[name] = f"{name} 상승 전환 {len(up)}번(1년 {len(up) / years:.1f}번)"
+        earn_lines += [
+            f"- ROE·현금흐름(A2): 10-K 연간 순이익 ÷ 자본 ≥ 17%, 영업현금흐름 ≥ 순이익 1.2배. {qcovered}개 종목에서 계산. "
+            f"EPS·매출 25%와 함께 통과한 종목은 하루 평균 {both.sum(axis=1).mean():.0f}개.",
+            vix_line,
+            "- 시장 신호(SPY, 거래량도 SPY): " + ", ".join(turns.values()) + ".",
+        ]
+    if args.set in ("hong", "namsg", "jongga", "trend", "split7", "canslim"):
         from swing.universe import sp_info
 
         info = data["INFO"] = sp_info()
@@ -411,7 +438,7 @@ def main() -> None:
             parts = [f"{r} {int(x.n)}회(평균 {x.avg * 100:+.1f}%, 계좌 기여 합계 {x.contrib * 100:+.0f}%p)"
                      for r, x in g.iterrows()]
             lines.append(f"- **{label}**: " + ", ".join(parts))
-    if args.set in ("sewer", "pullback_yt", "ptj", "chartdoc", "velez", "gojiro", "hong", "namsg", "jongga", "trend", "split7"):
+    if args.set in ("sewer", "pullback_yt", "ptj", "chartdoc", "velez", "gojiro", "hong", "namsg", "jongga", "trend", "split7", "canslim"):
         # The deep-drop rule picks stocks that crashed and came back; list who made the money
         # so we can check how many only joined today's index after recovering.
         lines += ["", "## 계좌 기여가 가장 큰 거래 15건", ""]
