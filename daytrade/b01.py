@@ -24,6 +24,7 @@ class Params:
     deadline: int = 90         # 매수 마감 (9:30부터 분). 90 = 11:00
     tp: float | None = 0.03    # 익절 (+3%). None = 장 마감까지 (D5)
     max_stop: float = 0.02     # 손절: 조정 저점 아래 또는 -2% 중 가까운 쪽
+    use_pull_stop: bool = True # False = 조정 저점은 무시하고 -2%만 (넓은 손절, 탐색용)
     base_last: int = 90        # D6 기준봉은 11:00 전에 시작한 봉까지
 
 
@@ -42,6 +43,10 @@ VARIANTS = [
     replace(D1, name="민감도 D2 조정거래량 50%", code="S-pr50", vol_filter=True, pull_ratio=0.50),
     replace(D1, name="민감도 매수마감 10:30", code="S-1030", deadline=60),
     replace(D1, name="민감도 매수마감 12:00", code="S-1200", deadline=150),
+    # 규칙서에 없는 탐색용: 한국 원전은 급등주를 노리므로 "평소보다 훨씬 큰 거래대금"만 남기고, 손절도 넓혀 본다
+    replace(D1, name="탐색 D7 급등주만(기준봉 ≥ 평소 하루의 20%)", code="D7", adv_frac=0.20),
+    replace(D1, name="탐색 D8 손절 -2%만", code="D8", use_pull_stop=False),
+    replace(D1, name="탐색 D9 급등주만 + 손절 -2%만", code="D9", adv_frac=0.20, use_pull_stop=False),
 ]
 
 
@@ -117,7 +122,9 @@ def find_entry(day, b3, adv, p: Params):
 def simulate_exit(day, e, p: Params):
     """매수 후 1분봉으로 손절·익절·마감 청산. dict(gross, exit_mi, reason, stop_dist) 또는 None."""
     px = e["px"]
-    stop = max(e["pull_low"] - 0.01, px * (1 - p.max_stop))
+    stop = px * (1 - p.max_stop)
+    if p.use_pull_stop:
+        stop = max(e["pull_low"] - 0.01, stop)
     if stop >= px:
         return None
     # 닿는 순간 산 1분봉은 고가·저가의 순서를 모르므로 다음 1분부터 본다

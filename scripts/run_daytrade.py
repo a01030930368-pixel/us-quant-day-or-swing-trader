@@ -26,7 +26,7 @@ def load_trades(prep):
         for (tk, d), g in df.groupby(["ticker", "d"], sort=False):
             day = {c: g[c].to_numpy() for c in ("mi", "o", "h", "l", "c", "v")}
             for t in b01.run_day(day, g.adv.iat[0]):
-                rows.append(dict(ticker=tk, d=d, **t))
+                rows.append(dict(ticker=tk, d=d, adv=g.adv.iat[0], **t))
             n += 1
         print(f"{os.path.basename(f)}: {n} candidate days, trades so far {len(rows)}", flush=True)
     return pd.DataFrame(rows)
@@ -98,6 +98,20 @@ def main():
         ret, k = portfolio.daily_returns(t, days, c)
         s = portfolio.stats(ret)
         lines.append(f"| {label} | {pct(s['cagr'])} | {pct(s['mdd'])} | {portfolio.net_return(k.gross, c).mean() * 100:.2f}% |")
+
+    t = t.assign(net=portfolio.net_return(t.gross, COST))
+    lines += ["", "## D1 신호를 나눠 보면 (모든 신호, 거래 하나하나의 평균)", "",
+              "| 구분 | 신호 수 | 승률(비용 후) | 평균(비용 전) | 평균(비용 후) |", "|---|---|---|---|---|"]
+    groups = [("20일 평균 거래대금", pd.cut(t.adv, [0, 1e8, 5e8, 2e9, np.inf],
+                                       labels=["2천만~1억$", "1억~5억$", "5억~20억$", "20억$ 이상"])),
+              ("기준봉 / 평소 하루 거래대금", pd.cut(t.base_rel, [0, 0.1, 0.2, 0.4, np.inf],
+                                         labels=["5~10%", "10~20%", "20~40%", "40% 이상"])),
+              ("매수가", pd.cut(t.entry_px, [0, 10, 30, 100, np.inf], labels=["5~10$", "10~30$", "30~100$", "100$ 이상"])),
+              ("청산 이유", t.reason)]
+    for label, key in groups:
+        for k, g in t.groupby(key, observed=True):
+            lines.append(f"| {label}: {k} | {len(g)} | {pct((g.net > 0).mean())} | {g.gross.mean() * 100:.2f}% | "
+                         f"{g.net.mean() * 100:.2f}% |")
 
     t = t.assign(year=pd.DatetimeIndex(t.d).year, entry_hm=t.entry_mi.map(lambda m: f"{9 + (30 + m) // 60}:{(30 + m) % 60:02d}"))
     lines += ["", "## D1 신호 특징", "",
