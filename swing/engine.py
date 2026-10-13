@@ -51,6 +51,7 @@ def run(strategy: Strategy, cost_bps: float = 20.0, start: str | None = None) ->
     first = 0 if start is None else int(dates.searchsorted(pd.Timestamp(start)))
     cost = cost_bps / 10_000
     n_max = strategy.max_positions
+    strategy.begin()
 
     cash = 1.0
     positions: dict[str, dict] = {}

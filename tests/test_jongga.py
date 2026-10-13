@@ -96,3 +96,13 @@ def test_e2_buys_the_red_close_adds_on_the_pause_and_sells_next_open():
     assert len(tr) == 1 and tr.ticker.iloc[0] == "A0"
     assert tr.entry_price.iloc[0] == pytest.approx(2 / (1 / 113.0 + 1 / 114.0))   # equal money, share-weighted
     assert tr.exit_price.iloc[0] == 115.0 and tr.reason.iloc[0] == "멈춤 다음 날 시가 매도"
+
+
+def test_same_object_runs_twice_the_same(monkeypatch):
+    for k, v in MODULE.items():
+        monkeypatch.setattr(jongga, k, v)
+    strat = type("M1Loose", (JONGGA[15],), {**LOOSE, "b_dry": 5.0})().prepare(_data())
+    r1 = engine.run(strat, cost_bps=30)
+    r2 = engine.run(strat, cost_bps=30)
+    assert len(r1.trades) > 0
+    pd.testing.assert_series_equal(r1.equity, r2.equity)

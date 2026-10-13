@@ -42,6 +42,9 @@ class Strategy:
     def _prepare(self) -> None:
         pass
 
+    def begin(self) -> None:
+        """Called at the start of every engine run."""
+
     def candidates(self, i: int) -> list[str]:
         raise NotImplementedError
 

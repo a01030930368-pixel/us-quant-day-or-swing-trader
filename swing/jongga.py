@@ -72,6 +72,7 @@ E_GAP, E_SECTOR = 0.02, 0.03   # E-3, E-4 [해석]
 E4_HOLD = 20                # [추가]
 STREAK, BREAK = 3, 10       # 6장: 3 losses in a row -> 10 days off [해석]
 W = 0.20                    # B-E single-technique weight [해석]
+_SHARED = None
 
 
 def _roll_max(x: np.ndarray, n: int) -> np.ndarray:
@@ -126,6 +127,28 @@ class Jongga(Strategy):
         return super().prepare(d, market)
 
     def _prepare(self) -> None:
+        self._base()
+        self.loud = (self.V >= self.vol_x * self.avg50) & self.liquid
+        self.bull = self.market_ok.reindex(self.c.index).to_numpy(bool)
+        self.orders: dict[int, list] = {}
+        for tech in self.techs:
+            getattr(self, f"_plan_{tech}")()
+        self.begin()
+
+    def begin(self) -> None:
+        """Clear what one run leaves behind, so the same object can run again (2x cost)."""
+        self.pending: dict[str, dict] = {}
+        self.meta: dict[str, dict] = {}
+        self.used: set = set()
+        self.streak, self.pause_until = 0, -1
+
+    def _base(self) -> None:
+        """Arrays every variant shares; built once per data set (34 variants would not fit in memory)."""
+        global _SHARED
+        if _SHARED is not None and _SHARED[0] is self.c and _SHARED[1] is self.info:
+            self.__dict__.update(_SHARED[2])
+            return
+        keys = set(self.__dict__)
         t = self.tradable
         self.col = {tk: k for k, tk in enumerate(t)}
         c, o, h, l, v = (x[t] for x in (self.c, self.o, self.h, self.l, self.v))
@@ -144,15 +167,7 @@ class Jongga(Strategy):
         self.vol5 = v.rolling(5, min_periods=5).mean().shift(1).to_numpy()
         self.vol20 = v.rolling(20, min_periods=20).mean().shift(1).to_numpy()
         self.S5, self.S10, self.S20 = (sma(c, n).to_numpy() for n in (5, 10, 20))
-        self.loud = (self.V >= self.vol_x * self.avg50) & self.liquid
-        self.bull = self.market_ok.reindex(c.index).to_numpy(bool)
-        self.orders: dict[int, list] = {}
-        for tech in self.techs:
-            getattr(self, f"_plan_{tech}")()
-        self.pending: dict[str, dict] = {}
-        self.meta: dict[str, dict] = {}
-        self.used: set = set()
-        self.streak, self.pause_until = 0, -1
+        _SHARED = (self.c, self.info, {k: v for k, v in self.__dict__.items() if k not in keys})
 
     def _add(self, day: int, k: int, spec: dict) -> None:
         """An order placed at day `day`'s close for the next day."""
