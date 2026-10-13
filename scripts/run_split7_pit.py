@@ -19,10 +19,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from swing import engine, metrics  # noqa: E402
 from swing.pit import (load_daily, membership, norm, snapshot_exits, snapshot_members,  # noqa: E402
                        sp500_snapshots, sp500_tables)
-from swing.split7 import E1, E5, F1, F4, F8  # noqa: E402
+from swing.split7 import E1, E2, E5, F1, F3, F4, F8, SWEEP  # noqa: E402
 
 START = "2018-01-02"
-VARIANTS = [E1, E5, F1, F4, F8]
+F1_TP5 = next(c for c in SWEEP if c.label.endswith("단기 묶음 +5%"))
+VARIANTS = [E1, E2, E5, F1, F3, F1_TP5, F4, F8]
+
+
+def short(cls) -> str:
+    return cls.label if "민감도" in cls.label else cls.label.split()[0]
 
 
 def line(name: str, res: engine.Result) -> str:
@@ -85,7 +90,8 @@ def main() -> None:
         f"- 빠진 뒤 10거래일 넘게 가격이 끊기면 그 뒤를 자름({info['cut']}개). 들고 있던 종목의 가격이 10거래일 넘게 없으면 "
         "마지막 가격에 판 것으로 봄('거래 중단').",
         "- 왼쪽 'PIT'는 그날 S&P 500에 들어 있던 종목만 새로 삼(빠진 뒤에도 들고 있던 것은 계속 관리). 오른쪽 '지금'은 "
-        "지금 S&P 500 종목만 삼(보통 백테스트 방식). 가격 자료는 같습니다.",
+        "지금 S&P 500 종목만 삼(보통 백테스트 방식). 가격 자료는 같습니다. 두 쪽 모두 S&P 500만이고 400(중형주)은 "
+        "구성 이력이 없어 뺐습니다.",
         "",
         "| 규칙 | 연수익률 | 최대낙폭 | 거래수 | 승률 | 평균 거래수익 | 거래 중단 매도 (평균) | 끝까지 못 판 종목 | 평균 투자비중 |",
         "|---|---|---|---|---|---|---|---|---|",
@@ -98,17 +104,17 @@ def main() -> None:
         for tag, member in (("PIT", pit), ("지금", now)):
             strat = cls().prepare({**data, "MEMBER": member}, market="SPY")
             res = engine.run(strat, cost_bps=a.cost_bps)
-            lines.append(line(f"{cls.label.split()[0]} {tag}", res))
+            lines.append(line(f"{short(cls)} {tag}", res))
             if tag == "PIT":
                 tr = res.trades.sort_values("return").head(8)
                 worst = ", ".join(f"{r.ticker} {r['return'] * 100:+.0f}% ({r.reason})" for _, r in tr.iterrows())
-                notes.append(f"- {cls.label.split()[0]} PIT 가장 나쁜 거래: {worst}")
+                notes.append(f"- {short(cls)} PIT 가장 나쁜 거래: {worst}")
                 held = sorted(res.open_positions, key=lambda p: p["entry_date"])[:8]
                 if held:
-                    notes.append(f"- {cls.label.split()[0]} PIT 끝까지 못 판 종목(오래된 순 8개): "
+                    notes.append(f"- {short(cls)} PIT 끝까지 못 판 종목(오래된 순 8개): "
                                  + ", ".join(f"{p['ticker']} ({p['entry_date']}~)" for p in held))
     lines.append(f"| S&P500 보유 | {metrics.cagr(spy) * 100:.1f}% | {metrics.max_drawdown(spy) * 100:.1f}% | - | - | - | - | - | - |")
-    lines += ["", *notes, "", "- 규칙 설명은 본 보고서(규칙서 10)와 같습니다. E1·E5·F1·F4·F8만 돌렸습니다(시장 필터를 쓰는 변형은 "
+    lines += ["", *notes, "", "- 규칙 설명은 본 보고서(규칙서 10)와 같습니다. E1·E2·E5·F1·F3·F1(단기 +5%)·F4·F8만 돌렸습니다(시장 필터를 쓰는 변형은 "
               "SPY 200일선 계산에 필요한 과거 자료가 짧아서 뺌).",
               "- 지금 빠진 종목 중 가격이 있는 것: " + ", ".join(have[:60]) + (" …" if len(have) > 60 else "")]
     out = Path(a.out)
