@@ -87,9 +87,20 @@ class Strategy:
     def on_close(self, trade: dict, i: int) -> None:
         """Called after every sale (whole or part) with the trade row, e.g. to count losing streaks."""
 
-    def open_exit(self, pos: dict, i: int) -> str | None:
-        """Reason to sell the whole position at day i's open, judged from that open, or None."""
+    def open_exit(self, pos: dict, i: int) -> str | tuple[str, float] | None:
+        """Reason to sell at day i's open, judged from that open, or None.
+
+        (reason, share) sells only that share of the position.
+        """
         return None
+
+    def partial_stops(self, pos: dict, i: int) -> list[tuple[float, float, str]]:
+        """(price, share of the position, reason) sold during day i if the low reaches the price.
+
+        Checked after the full stop, highest price first; the strategy marks
+        which ones it has used.
+        """
+        return []
 
     def close_exit(self, pos: dict, i: int) -> str | None:
         """Reason to sell the whole position at day i's close, judged from that close, or None."""

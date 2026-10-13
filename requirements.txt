@@ -5,3 +5,4 @@ requests>=2.31
 pytest>=8.0
 tabulate>=0.9
 lxml>=4.9
+pyarrow>=16
