@@ -24,6 +24,11 @@ HALF_MAX_MI = 215  # SPY 마지막 1분봉이 이보다 이르면 반나절 장
 
 
 # ---------------------------------------------------------------- 자료
+# 상장일 (그 전 같은 코드는 다른 종목이라 버림)
+INCEPTION = {"SPXL": "2008-11-05", "BGU": "2008-11-05", "UPRO": "2009-06-25", "TQQQ": "2010-02-11", "TNA": "2008-11-05",
+             "SOXL": "2010-03-11", "FAS": "2008-11-06", "LABU": "2015-05-28", "TECL": "2008-12-17", "COIN": "2021-04-14",
+             "BITO": "2021-10-19", "IBIT": "2024-01-11", "HUT": "2021-06-14", "BITF": "2021-06-24", "GBTC": "2015-05-04",
+             "SMH": "2000-06-05", "QQQ": "1999-03-10", "IWM": "2000-05-22"}
 RULE_TICKERS = {"b21": ETF3 + BASE + ["BGU"], "b22": ["TNA", "IWM", "SPXL", "BGU", "TQQQ", "SPY"],
                 "b23": ["SPXL", "BGU", "TNA", "TQQQ", "SPY"], "b25": CRYPTO + ["SPY"]}
 
@@ -37,6 +42,8 @@ def load(prep, tickers):
         parts.append(x[(x.mi >= 0) | (x.ticker == "GBTC")])
     df = pd.concat(parts, ignore_index=True)
     df["d"] = pd.to_datetime(df.d).dt.date
+    first = df.ticker.map({k: dt.date.fromisoformat(v) for k, v in INCEPTION.items()}).fillna(dt.date(1900, 1, 1))
+    df = df[df.d >= first]
     # SPXL = 2012년 이름이 바뀌기 전 BGU (같은 펀드). 둘 다 있는 날은 SPXL
     bgu = df[df.ticker == "BGU"]
     have = set(df.loc[df.ticker == "SPXL", "d"])
