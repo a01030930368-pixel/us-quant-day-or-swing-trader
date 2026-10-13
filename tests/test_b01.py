@@ -230,6 +230,8 @@ def test_b08_ipo_first_day():
     assert b08.bad_prints(dict(day, h=h4))
     c5 = c.copy(); c5[-1] = 0.04                                     # 마지막 봉만 잘못 찍힘
     assert b08.bad_prints(dict(day, c=c5))
+    c6 = c.copy(); c6[:30] = 139999.99                               # 한참 동안 자리채움 값이었다가 정상 가격
+    assert b08.bad_prints(dict(day, o=c6.copy(), h=np.maximum(h, c6), l=np.minimum(l, c6), c=c6))
 
 
 def test_b09_crash_rebound():

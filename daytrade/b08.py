@@ -24,7 +24,11 @@ def bad_prints(day, k=3.0, w=7):
     pad = np.pad(c, w, mode="edge")
     med = np.median(np.lib.stride_tricks.sliding_window_view(pad, 2 * w + 1), axis=1)
     px = np.vstack([day["o"], day["h"], day["l"], c])
-    return bool(((px > med * k) | (px < med / k)).any())
+    if ((px > med * k) | (px < med / k)).any():
+        return True
+    # 값 자체가 한순간 3배 넘게 바뀌어 그대로 이어지는 경우 (예: 139999.99로 시작해 나중에 정상 가격)
+    lv = np.r_[day["o"][0], c]
+    return bool((np.abs(np.diff(np.log(lv))) > np.log(k)).any())
 
 
 def dv60(day):
