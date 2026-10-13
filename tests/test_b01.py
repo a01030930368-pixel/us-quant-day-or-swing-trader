@@ -247,3 +247,43 @@ def test_b09_crash_rebound():
     l2 = l.copy(); l2[100] = 84.0                         # 매수 뒤 저가 아래로 -> 손절
     t = b09.confirmed(dict(day, l=l2), 100.0)
     assert t["reason"] == "손절" and abs(t["exit_px"] - 84.9) < 1e-9
+
+
+def _mk(c, v=None, spread=0.02):
+    n = len(c)
+    c = np.asarray(c, float)
+    o = np.r_[c[0], c[:-1]]
+    return dict(mi=np.arange(n), o=o, h=np.maximum(o, c) + spread, l=np.minimum(o, c) - spread, c=c,
+                v=np.full(n, 1000.0) if v is None else np.asarray(v, float))
+
+
+def test_mom_simulate_and_b15():
+    from daytrade import mom
+    day = _mk(np.r_[np.full(10, 10.0), np.linspace(10, 11, 20), np.full(360, 11.0)])
+    r = mom.simulate(day, 5, 10.0, 9.5, target=10.5)
+    assert r["reason"] == "익절" and abs(r["exit_px"] - 10.5) < 1e-9
+    r = mom.simulate(day, 5, 10.0, 9.5)
+    assert r["reason"] == "마감" and r["exit_mi"] == mom.EOD
+    r = mom.simulate(day, 5, 10.0, 9.5, time_stop=10)
+    assert r["reason"] == "시간" and r["exit_mi"] == 15
+    # b15: 전날 종가 10, 시가 9.6 -> 10:00에 거래량 실린 봉이 10 위로 마감
+    c = np.r_[np.full(30, 9.7), 10.05, np.full(359, 10.1)]
+    v = np.full(390, 1000.0); v[30] = 5000.0
+    day = _mk(c, v, spread=0.01)
+    t = mom.b15(day, 10.0, 10.6, 100.0, lambda m: 0.1)
+    assert t["entry_mi"] == 31 and abs(t["entry_px"] - 10.05) < 1e-9
+    assert abs(t["stop_dist"] - (10.05 - (9.69 - 0.01)) / 10.05) < 1e-9
+    assert mom.b15(day, 10.0, 10.6, 1e9, lambda m: 0.1) is None      # 상대 거래량 부족
+
+
+def test_mom_b14_and_b11():
+    from daytrade import mom
+    c = np.r_[np.full(15, 20.0), 20.3, np.full(374, 20.6)]
+    day = _mk(c, spread=0.005)                         # 매수 봉 저가 19.995 > 손절 19.99 (VWAP 20 - 0.01)
+    t = mom.b14(day, line=20.2)
+    assert t["entry_mi"] == 15 and abs(t["entry_px"] - 20.21) < 1e-9 and t["reason"] == "마감"
+    assert mom.b14(_mk(c, spread=0.05), line=20.2)["reason"] == "손절"   # 같은 봉에서 손절가도 닿으면 손절
+    v = np.full(390, 1000.0); v[10] = 9000.0
+    day = _mk(np.r_[np.full(10, 20.0), 21.0, np.full(379, 21.5)], v, spread=0.05)
+    t = mom.b11(day, line=20.5)
+    assert t["entry_mi"] == 11 and abs(t["entry_px"] - 21.0) < 1e-9
