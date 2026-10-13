@@ -1,0 +1,16 @@
+# 무료 분봉 데이터 출처 탐색 (조사용, 백테스트 아님)
+name: probe-intraday
+on:
+  push:
+    branches: [claude/project-thread-qmq50k]
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas pyarrow
+      - run: python scripts/probe_intraday.py
