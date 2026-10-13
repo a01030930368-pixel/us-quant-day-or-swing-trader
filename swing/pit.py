@@ -80,7 +80,8 @@ def sp500_tables(cache: Path = Path("data_cache") / "sp500_pit.csv") -> tuple[li
     return current, changes
 
 
-FJA = "https://api.github.com/repos/fja05680/sp500/contents/"
+FJA = ("https://raw.githubusercontent.com/fja05680/sp500/master/"
+       "S%26P%20500%20Historical%20Components%20%26%20Changes%20(Updated).csv")
 
 
 def sp500_snapshots(cache: Path = Path("data_cache") / "sp500_snapshots.csv") -> pd.DataFrame:
@@ -90,19 +91,14 @@ def sp500_snapshots(cache: Path = Path("data_cache") / "sp500_snapshots.csv") ->
         return pd.read_csv(cache, parse_dates=["date"])
     import requests
 
-    files = requests.get(FJA, headers={"User-Agent": "us-quant-day-or-swing-trader backtest"}, timeout=30).json()
-    pick = sorted(f for f in files if f["name"].startswith("S&P 500 Historical Components")
-                  and f["name"].endswith(".csv"))
-    if not pick:
-        raise RuntimeError("fja05680/sp500 파일을 찾지 못했습니다")
-    raw = requests.get(pick[-1]["download_url"], timeout=60).text
+    raw = requests.get(FJA, headers={"User-Agent": "us-quant-day-or-swing-trader backtest"}, timeout=60).text
     df = pd.read_csv(StringIO(raw))
     df.columns = [c.strip().lower() for c in df.columns]
     df = df.rename(columns={df.columns[0]: "date", df.columns[1]: "tickers"})
     df["date"] = pd.to_datetime(df["date"])
     cache.parent.mkdir(exist_ok=True)
     df[["date", "tickers"]].to_csv(cache, index=False)
-    print("S&P 500 snapshots:", pick[-1]["name"], len(df), "rows", df["date"].min().date(), "~", df["date"].max().date())
+    print("S&P 500 snapshots:", len(df), "rows", df["date"].min().date(), "~", df["date"].max().date())
     return df[["date", "tickers"]]
 
 
