@@ -491,6 +491,8 @@ def inst(base, kind):
 
 
 def pick(t, v, base, kind):
+    if "variant" not in t:
+        return pd.DataFrame(columns=["variant", "base", "kind", "d", "exit_d", "days", "gross", "path", "path_d"])
     return t[(t.variant == v) & (t.base == base) & (t.kind == kind)].sort_values("d")
 
 
@@ -1776,19 +1778,75 @@ def rule_b60(book):
     return t, report("b60 백테스트 결과: 방어주 앞섬", "섹터 SPDR (1998-12~).", t, names, bases=("QQQ", "SPY"), acct=std_acct(t, names))
 
 
+def rule_b51x(book):
+    """b51~b60 후보(b52 W3, b54 L4, b55 F1·F3, b57 H4, b59 S1)와 지난 최선 Q4(P5 + Y2)의 겹침, 한 계좌 성적."""
+    t31, _ = rule_b31(book)
+    t32, _ = rule_b32(book)
+    t36, _ = rule_b36(book)
+    t47, _ = rule_b47(book)
+    t52, _ = rule_b52(book)
+    t54, _ = rule_b54(book)
+    t55, _ = rule_b55(book)
+    t57, _ = rule_b57(book)
+    t59, _ = rule_b59(book)
+    start = dt.date(2011, 1, 1)
+    clip = lambda x: x[x.d >= start]  # noqa: E731
+    sig = {"W3 (b52) SPXL": pick(t52, "W3", "SPY", "real3"), "L4 (b54) TQQQ": pick(t54, "L4", "QQQ", "real3"),
+           "F1 (b55) SPXL": pick(t55, "F1", "SPY", "real3"), "F3 (b55) SPXL": pick(t55, "F3", "SPY", "real3"),
+           "H4 (b57) SPXL": pick(t57, "H4", "SPY", "real3"), "S1 (b59) SPXL": pick(t59, "S1", "SPY", "real3"),
+           "S2 (b32) SPXL": pick(t32, "S2", "SPY", "real3"), "D3 (b31) TQQQ": pick(t31, "D3", "QQQ", "real3"),
+           "B4 (b36) TQQQ": pick(t36, "B4", "QQQ", "real3"), "Y2 (b47) SPXL": pick(t47, "Y2", "SPY", "real3")}
+    sig = {k: clip(v) for k, v in sig.items()}
+    held = {k: {d for x in v.itertuples() for d in x.path_d} for k, v in sig.items()}
+    ks = list(sig)
+    lines = ["# b51~b60 후보 + 지난 최선 조합(Q4 = P5 + Y2) 합치기", "",
+             "실제 3배 ETF, 2011~2026-03. 같은 날 여러 신호면 돈을 똑같이 나누고, 신호 없는 날은 현금. 비용은 종목 비중이 바뀐 만큼. "
+             + COMMON_NOTE, "", "## 신호가 얼마나 겹치나 (두 신호 중 적은 쪽 보유일 가운데 같이 들고 있던 날 비율)", "",
+             "| | 거래 수 | 보유일 | " + " | ".join(k.split(" ")[0] + " " + k.split(" ")[-1] for k in ks) + " |",
+             "|---|---|---|" + "---|" * len(ks)]
+    for a in ks:
+        cells = [f"{len(held[a] & held[b]) / max(1, min(len(held[a]), len(held[b]))):.0%}" if a != b else "" for b in ks]
+        lines.append(f"| {a} | {len(sig[a])} | {len(held[a])} | " + " | ".join(cells) + " |")
+    q4 = set().union(*(held[k] for k in ("S2 (b32) SPXL", "D3 (b31) TQQQ", "B4 (b36) TQQQ", "Y2 (b47) SPXL")))
+    lines += ["", "| 신호 | Q4 보유일과 겹치는 비율 | Q4 없는 날에만 있는 보유일 |", "|---|---|---|"]
+    for k in ks[:6]:
+        lines.append(f"| {k} | {len(held[k] & q4) / max(1, len(held[k])):.0%} | {len(held[k] - q4)} |")
+    S = sig
+    Q4 = [S["S2 (b32) SPXL"], S["D3 (b31) TQQQ"], S["B4 (b36) TQQQ"], S["Y2 (b47) SPXL"]]
+    combos = [("Q4 P5 + Y2 (지난 최선)", Q4, False),
+              ("N1 Q4 + S1 산타", Q4 + [S["S1 (b59) SPXL"]], False),
+              ("N2 Q4 + L4 TQQQ", Q4 + [S["L4 (b54) TQQQ"]], False),
+              ("N3 Q4 + F1 SPXL", Q4 + [S["F1 (b55) SPXL"]], False),
+              ("N4 Q4 + F3 SPXL", Q4 + [S["F3 (b55) SPXL"]], False),
+              ("N5 Q4 + W3 SPXL", Q4 + [S["W3 (b52) SPXL"]], False),
+              ("N6 Q4 + H4 SPXL", Q4 + [S["H4 (b57) SPXL"]], False),
+              ("N7 Q4 + S1 + L4", Q4 + [S["S1 (b59) SPXL"], S["L4 (b54) TQQQ"]], False),
+              ("N8 Q4 + 후보 전부", Q4 + [S[k] for k in ks[:6]], False),
+              ("N9 후보 6개만 (Q4 없이)", [S[k] for k in ks[:6]], False)]
+    lines += ["", "## 한 계좌 성적 (2011~2026-03)", ""]
+    a_lines, series = acct_table(book, combos, start=start)
+    lines += a_lines
+    lines += ["", "## 2020년 빼고 (그해 수익을 0으로)", "", *no2020_table(book, series, start)]
+    lines += ["", "## 해마다", "", *yearly_series(series, [("Q4 P5 + Y2 (지난 최선)", COST_LEVELS[1][0]), ("N7 Q4 + S1 + L4", COST_LEVELS[1][0]),
+                                                         ("N8 Q4 + 후보 전부", COST_LEVELS[1][0]), ("N8 Q4 + 후보 전부", COST_LEVELS[0][0])],
+                                         book, start)]
+    return pd.concat([t52, t54, t55], ignore_index=True), lines
+
+
 RULE_TICKERS = {"b34": ["SPY"] + SECTORS, "b35": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"],
                 "b31x": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"], "b44": ["SPY", "QQQ", "IWM", "TLT", "GLD", "SPXL", "BGU", "TQQQ", "TNA"],
                 "b45": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"],
                 "b41x": ["SPY", "QQQ", "IWM", "TLT", "GLD", "SPXL", "BGU", "TQQQ", "TNA"],
                 "b44x": ["SPY", "QQQ", "IWM", "TLT", "SPXL", "BGU", "TQQQ", "TNA"],
-                "b52": ["SPY", "SPXL", "BGU"] + SECTORS, "b60": ["SPY", "QQQ", "SPXL", "BGU", "TQQQ", "XLU", "XLP", "XLK", "XLY"]}
+                "b52": ["SPY", "SPXL", "BGU"] + SECTORS, "b60": ["SPY", "QQQ", "SPXL", "BGU", "TQQQ", "XLU", "XLP", "XLK", "XLY"],
+                "b51x": ["SPY", "QQQ", "IWM", "SPXL", "BGU", "TQQQ", "TNA"] + SECTORS}
 
 
 RULES = {"b26": rule_b26, "b27": rule_b27, "b28": rule_b28, "b29": rule_b29, "b30": rule_b30, "b29x": rule_b29x, "b31": rule_b31, "b32": rule_b32, "b33": rule_b33,
          "b34": rule_b34, "b35": rule_b35, "b36": rule_b36, "b37": rule_b37, "b38": rule_b38, "b39": rule_b39, "b40": rule_b40,
          "b31x": rule_b31x, "b41": rule_b41, "b42": rule_b42, "b43": rule_b43, "b44": rule_b44, "b45": rule_b45,
          "b46": rule_b46, "b47": rule_b47, "b48": rule_b48, "b49": rule_b49, "b50": rule_b50, "b41x": rule_b41x, "b44x": rule_b44x, "b51": rule_b51, "b52": rule_b52, "b53": rule_b53, "b54": rule_b54, "b55": rule_b55,
-         "b56": rule_b56, "b57": rule_b57, "b58": rule_b58, "b59": rule_b59, "b60": rule_b60}
+         "b56": rule_b56, "b57": rule_b57, "b58": rule_b58, "b59": rule_b59, "b60": rule_b60, "b51x": rule_b51x}
 
 
 def main():
