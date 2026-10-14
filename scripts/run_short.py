@@ -40,11 +40,20 @@ class Book:
         self.idx = {tk: {d: i for i, d in enumerate(g.d)} for tk, g in self.tab.items()}
         self.cal = list(self.tab["SPY"].d)
         self._base = {}
+        # 종목 줄 번호 -> SPY 거래일 번호 (QQQ는 2004~2011년 이름이 QQQQ라 자료가 비어 있음: 빈 곳을 건너는 거래는 버림)
+        spy_pos = {d: i for i, d in enumerate(self.cal)}
+        self.pos = {tk: np.array([spy_pos.get(d, -10 ** 6) for d in g.d]) for tk, g in self.tab.items()}
+
+    def continuous(self, tk, i, j):
+        p = self.pos[tk]
+        return p[i] >= 0 and p[j] - p[i] == j - i
         self.by_day = {k: (g.mi.to_numpy(), g.c.to_numpy()) for k, g in bars.groupby(["ticker", "d"], sort=False)}
 
     def legs(self, base, i, j):
         """기초 ETF i일 종가 매수 -> j일 종가 매도의 세 가지 수익과 날마다 수익(계좌 계산용)."""
         g = self.tab[base]
+        if not self.continuous(base, i, j):
+            return {}
         c = g.c.to_numpy()
         ds = list(g.d[i:j + 1])
         out = {"1x": (short.hold_return(c, i, j), ds, c[i + 1:j + 1] / c[i:j] - 1)}
@@ -53,7 +62,7 @@ class Book:
         lev = PAIRS[base]
         if lev in self.idx:
             a, b = self.idx[lev].get(ds[0]), self.idx[lev].get(ds[-1])
-            if a is not None and b is not None and b - a == j - i:
+            if a is not None and b is not None and b - a == j - i and self.continuous(lev, a, b):
                 cl = self.tab[lev].c.to_numpy()
                 out["real3"] = (short.hold_return(cl, a, b), ds, cl[a + 1:b + 1] / cl[a:b] - 1)
         return out
@@ -72,6 +81,8 @@ class Book:
                 g = self.tab[base]
             c = g.c.to_numpy()
             ok = np.ones(len(c) - n, bool) if since is None else (pd.to_datetime(g.d[:len(c) - n]).dt.year >= since).to_numpy()
+            p = self.pos[g.ticker.iloc[0]]
+            ok &= (p[:-n] >= 0) & (p[n:] - p[:-n] == n)
             if kind == "syn3":
                 r = c[1:] / c[:-1] - 1
                 lg = np.r_[0.0, np.cumsum(np.log1p(3 * r))]
@@ -339,6 +350,8 @@ def rule_b28(book):
             # F1·F2: 발표 1분 전 가격에 매도
             for v, back in (("F1", 1), ("F2", 2)):
                 i = k - back
+                if not book.continuous(base, i, k):
+                    continue
                 px = book.price_before(base, r.d, r.ann_mi)
                 if px is None:
                     continue
