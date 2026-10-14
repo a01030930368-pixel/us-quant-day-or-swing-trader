@@ -13,7 +13,7 @@ from functools import partial
 import numpy as np
 import pandas as pd
 
-from .events import Panel, Trade, one_per_stock, walk
+from .events import Panel, Trade, one_per_stock, walk, yearly_trades
 
 TITLE = "뉴스 없는 급락 반등"
 RULEBOOK = "14"
@@ -107,7 +107,11 @@ RULES = [
 
 
 def extra(p: Panel, ext: dict, frames: dict[str, pd.DataFrame], split: pd.Timestamp) -> list[str]:
-    lines = ["## 거래대금 크기별 (시가총액 대신, N1)", "",
+    lines = []
+    for name in ("N9", "N4"):
+        if name in frames:
+            lines += [f"## 해마다 ({name})", "", yearly_trades(frames[name]), ""]
+    lines += ["## 거래대금 크기별 (시가총액 대신, N1)", "",
              "시가총액 자료가 없어 매수 전 20일 평균 거래대금으로 나눴습니다 [근사]. 논문: 작은 종목에서만 효과.", ""]
     df = frames.get("N1")
     if df is None or df.empty:

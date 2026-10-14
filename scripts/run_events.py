@@ -125,7 +125,7 @@ def load_pit(daily: str) -> tuple[dict, list[str], dict, list[str]]:
     return wide, cols, {"MEMBER": member}, notes
 
 
-def build_ext(sp: Spec, panel: Panel, ext: dict) -> list[str]:
+def build_ext(sp: Spec, panel: Panel, ext: dict, pit: bool = False) -> list[str]:
     notes = []
     if "earnings" in sp.needs or "news" in sp.needs:
         from swing.sec_filings import earnings_days, load_submissions, news_days
@@ -135,6 +135,12 @@ def build_ext(sp: Spec, panel: Panel, ext: dict) -> list[str]:
         subs = load_submissions(want, since=since)
         if not any(subs.values()):
             raise RuntimeError("SEC 공시 목록을 하나도 받지 못했습니다. 접속이 막혔는지 확인하세요.")
+        missing = [k for k, t in enumerate(panel.tickers) if not subs.get(t)]
+        if pit:
+            panel.elig[:, missing] = False
+            gone = sum(1 for k in missing if panel.member[:, k].any())
+            notes.append(f"- SEC 회사 번호를 못 찾은 종목(대부분 상장폐지·이름 바뀐 종목) {gone}개는 뺐습니다. 이 점검은 "
+                         "'나중에 지수에 들어온 종목을 미리 고르는' 치우침만 없애고, 상장폐지 종목은 여전히 빠져 있습니다.")
         if "earnings" in sp.needs:
             ext["earnings"] = earnings_days(subs, panel.tickers, panel.dates)
             got = sum(1 for v in ext["earnings"].values() if len(v))
@@ -183,7 +189,7 @@ def main() -> None:
     sp = SPECS[a.set]
     split = pd.Timestamp(a.split)
     if a.pit:
-        if not sp.pit_ok:
+        if not (sp.pit_ok or a.set in ("preearn", "epgap", "nonews")):
             raise SystemExit(f"{a.set}: SEC·배당 자료가 상장폐지 종목엔 없어 그때 S&P 500 점검을 하지 않습니다.")
         data, cols, ext, notes = load_pit(a.pit)
         panel = Panel(data, MARKET, member=ext.pop("MEMBER"))
@@ -199,7 +205,7 @@ def main() -> None:
             {k: v for k, v in data.items() if k != "INFO"}, MARKET)
         start = sp.start
         bounds = sp.periods
-    notes += build_ext(sp, panel, ext)
+    notes += build_ext(sp, panel, ext, pit=bool(a.pit))
     end = panel.dates[-1]
     periods = periods_of(bounds, end)
     cost = a.cost_bps / 10_000

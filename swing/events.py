@@ -203,12 +203,15 @@ def simulate(trades: list[Trade], panel: Panel, cost_bps: float, slots: int = 10
 # ---------------------------------------------------------------- tables
 def frame(trades: list[Trade], panel: Panel, cost_bps: float) -> pd.DataFrame:
     cost = cost_bps / 10_000
+    spy = pd.Series(panel.spy).ffill().to_numpy()
     rows = [{"ticker": panel.tickers[t.k], "entry_date": panel.dates[t.ei], "entry_price": t.ep,
              "exit_date": panel.dates[t.last()], "gross": t.gross(), "net": t.net(cost),
+             "excess": t.gross() - (spy[t.last()] / spy[t.ei] - 1),
              "days": t.last() - t.ei,
              "reason": "/".join(sorted({r for _, _, _, r in t.legs})), "score": t.score, "tag": t.tag}
             for t in trades]
-    cols = ["ticker", "entry_date", "entry_price", "exit_date", "gross", "net", "days", "reason", "score", "tag"]
+    cols = ["ticker", "entry_date", "entry_price", "exit_date", "gross", "net", "excess", "days", "reason", "score",
+            "tag"]
     return pd.DataFrame(rows, columns=cols)
 
 
@@ -219,7 +222,9 @@ def trade_stats(df: pd.DataFrame) -> dict:
     g, r = df["gross"], df["net"]
     top = r.sort_values(ascending=False).iloc[10:] if n > 10 else r.iloc[:0]
     t = r.mean() / (r.std(ddof=1) / np.sqrt(n)) if n > 2 and r.std(ddof=1) > 0 else np.nan
-    return {"거래수": n, "비용 전 평균": g.mean(), "비용 후 평균": r.mean(), "중앙값(후)": r.median(),
+    ex = df["excess"] if "excess" in df else pd.Series(np.nan, index=df.index)
+    return {"거래수": n, "비용 전 평균": g.mean(), "SPY 대비 평균(전)": ex.mean(), "비용 후 평균": r.mean(),
+            "중앙값(후)": r.median(),
             "승률": (r > 0).mean(), "보유일": df["days"].mean(),
             "상위10 뺀 평균(후)": top.mean() if len(top) else np.nan, "t(거래)": t,
             "관문": "통과" if (g.mean() >= GATE_GROSS and n >= GATE_N) else "탈락"}
@@ -239,7 +244,7 @@ def account_stats(acc: Account, spy: pd.Series, a: pd.Timestamp, b: pd.Timestamp
             "투자비중": cut(acc.exposure).mean(), "SPY 연수익": metrics.cagr(s)}
 
 
-PCT = {"비용 전 평균", "비용 후 평균", "중앙값(후)", "승률", "상위10 뺀 평균(후)", "계좌 연수익", "최대낙폭",
+PCT = {"비용 전 평균", "SPY 대비 평균(전)", "비용 후 평균", "중앙값(후)", "승률", "상위10 뺀 평균(후)", "계좌 연수익", "최대낙폭",
        "투자비중", "SPY 연수익"}
 
 

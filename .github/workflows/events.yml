@@ -35,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        set: [elder, taxloss, spadd, spdel, nr7, bulkowski]
+        set: [elder, taxloss, spadd, spdel, nr7, bulkowski, preearn, epgap, nonews]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
