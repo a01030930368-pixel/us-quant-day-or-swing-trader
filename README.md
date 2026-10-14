@@ -26,6 +26,9 @@
 | `swing/gojiro.py` | 유튜브 고지로 '이동평균선 대순환 + 쿨라매기 돌파' 규칙서 05의 시험 목록 K1~K8 |
 | `swing/split7.py` | 유튜브 '세븐 스플릿 + 엔벨로프 하단 분할 매수' 규칙서 10의 시험 목록 E1~E6, F1~F9 (묶음을 따로 관리하는 자체 계산) |
 | `swing/canslim.py` | 유튜브 '캔슬림 시장 반전 박스권 돌파 + 지수 5일선 시장 판단' 규칙서 11의 시험 목록 R1~R13 |
+| `swing/events.py` | 규칙서 12~21(논문·책 전략)용 사건 매매 틀: 모든 신호의 거래당 숫자 + 같은 칸 계좌 |
+| `swing/preearn.py` ~ `swing/bulkowski.py` | 규칙서 12 실적 발표 직전(`preearn`), 13 실적 갭 스윙(`epgap`), 14 뉴스 없는 급락(`nonews`), 15 엘더(`elder`), 16 배당락 전(`divmonth`), 17 연말 손실주(`taxloss`), 18·19 S&P 500 편입·퇴출(`spindex`), 20 NR7(`nr7`), 21 불코우스키 패턴(`bulkowski`) |
+| `swing/sec_filings.py`, `swing/dividends.py` | SEC 전체 공시 목록(실적 발표 8-K, 뉴스 대신 공시), 야후 배당 기록 |
 | `swing/pit.py`, `scripts/run_split7_pit.py` | 규칙서 10 생존 편향 점검: 그때의 S&P 500 종목(상장폐지 포함, 무료 1분봉을 하루로 묶은 가격) vs 지금 종목 |
 | `swing/trendjb.py` | 유튜브 부자회사원 '추세 종배'(200일선 위 첫 장대양봉 뒤 마른 음봉 종가) 규칙서 09의 시험 목록 T1~T13 |
 | `swing/jongga.py` | 유튜브 '직장인 종가 배팅' 모음 규칙서 08의 시험 목록 A~E, M (서희파더·강창권·남석관, S&P 500 + 400) |
@@ -40,6 +43,7 @@
 | `swing/universe.py` | 매매 대상 종목 목록: 대형주 약 100개, 중형주 약 130개, 소형주 약 160개 |
 | `swing/metrics.py` | 수익률·최대낙폭·샤프 계산 (us-quant-trader에서 가져옴) |
 | `swing/brokers.py` | 가짜 계좌(SimBroker)와 키움 REST 연결 (us-quant-trader에서 가져옴, 모의매매 단계에서 사용) |
+| `scripts/run_events.py` | 규칙서 12~21 하나를 돌려 `reports/events_<set>.md` 생성 (`--set preearn/epgap/nonews/elder/divmonth/taxloss/spadd/spdel/nr7/bulkowski`, `--pit 폴더`로 그때 S&P 500 점검). CI: `.github/workflows/events.yml` |
 | `scripts/run_backtest.py` | 전략을 백테스트하고 `reports/swing_report_*.md` 생성 (`--universe large` 대형주, `all` 대형주+중형주, `small` 소형주, `every` 전부, `sp1500` S&P 1500 전체(위키백과에서 목록 받음); `--set legends` 1그룹, `legends2` 2그룹, `legends_all` 1·2그룹, `refine` 와인스타인·다바스 다듬기, `earnings` 실적 조건 비교, `earnings_wide` 오닐·미너비니 + 실적(넓은 종목용), `pead` 실적 서프라이즈 후 추세, `reversion` 단기 과매도 반등, `quality` 총이익률 장기 보유, `announce` 실적 발표일 기준 서프라이즈, `insider` 내부자 매수 따라가기, `blend` 여러 전략 합치기, `sewer` 하수구 돌파(200일선 두 번째 돌파), `pullback_yt` 유튜브 눌림목 매매(규칙서 01), `ptj` 유튜브 폴 튜더 존스식 변곡점 돌파(규칙서 02), `chartdoc` 유튜브 차트박사 신고가 + 20일선 눌림 + 5일선 돌파(규칙서 03), `velez` 유튜브 벨레즈 3연속 음봉 눌림 + 전봉 고가 돌파(규칙서 04), `gojiro` 유튜브 고지로 이동평균선 대순환 + 쿨라매기 돌파(규칙서 05), `hong` 유튜브 홍인기 주도주 첫 장대양봉(규칙서 06), `namsg` 유튜브 남석관 장대양봉 후 첫 5일선(규칙서 07), `jongga` 유튜브 종가배팅 모음(규칙서 08), `trend` 유튜브 추세 종배(규칙서 09), `split7` 유튜브 세븐 스플릿 + 엔벨로프 하단(규칙서 10), `canslim` 유튜브 캔슬림 시장 반전 박스권 돌파(규칙서 11), `round2` 1·2차 후보) |
 
 ## 실행 방법
