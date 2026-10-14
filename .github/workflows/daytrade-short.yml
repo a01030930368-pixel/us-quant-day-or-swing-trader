@@ -88,7 +88,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rule: [b31, b32, b33, b34, b35, b36, b37, b38, b39, b40]
+        rule: [b31x]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

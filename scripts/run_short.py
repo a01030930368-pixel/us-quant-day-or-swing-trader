@@ -972,11 +972,83 @@ def rule_b40(book):
                      acct=std_acct(t, names))
 
 
-RULE_TICKERS = {"b34": ["SPY"] + SECTORS, "b35": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"]}
+def rule_b31x(book):
+    """과매도 반등 가족 합치기: 신호 겹침과 한 계좌 성적."""
+    t29, _ = rule_b29(book)
+    t31, _ = rule_b31(book)
+    t32, _ = rule_b32(book)
+    t35, _ = rule_b35(book)
+    t36, _ = rule_b36(book)
+    t30, _ = rule_b30(book)
+    t28, _ = rule_b28(book)
+    start = dt.date(2011, 1, 1)
+    clip = lambda x: x[x.d >= start]  # noqa: E731
+    sig = {"R1 (b29) SPXL": pick(t29, "R1", "SPY", "real3"), "R2 (b29) SPXL": pick(t29, "R2", "SPY", "real3"),
+           "D3 (b31) TQQQ": pick(t31, "D3", "QQQ", "real3"), "D4 (b31) TQQQ": pick(t31, "D4", "QQQ", "real3"),
+           "S2 (b32) SPXL": pick(t32, "S2", "SPY", "real3"), "S2 (b32) TQQQ": pick(t32, "S2", "QQQ", "real3"),
+           "A3 (b35) 실제 3배": t35[(t35.variant == "A3") & (t35.kind == "real3")].sort_values("d"),
+           "B4 (b36) TQQQ": pick(t36, "B4", "QQQ", "real3"), "I4 (b30) SPXL": pick(t30, "I4", "SPY", "real3"),
+           "F2 (b28) TQQQ": pick(t28, "F2", "QQQ", "real3")}
+    sig = {k: clip(v) for k, v in sig.items()}
+    held = {k: {d for x in v.itertuples() for d in x.path_d} for k, v in sig.items()}
+    ks = list(sig)
+    lines = ["# 과매도 반등 가족 합치기 (b29·b31·b32·b35·b36 + b30·b28)", "",
+             "실제 3배 ETF, 2011~2026-03. 같은 날 여러 신호면 돈을 똑같이 나누고, 신호 없는 날은 현금. 비용은 종목 비중이 바뀐 만큼. "
+             + COMMON_NOTE, "", "## 신호가 얼마나 겹치나 (두 신호 중 적은 쪽 보유일 가운데 같이 들고 있던 날 비율)", "",
+             "| | 보유일 | " + " | ".join(k.split(" ")[0] + " " + k.split(" ")[-1] for k in ks) + " |", "|---|---|" + "---|" * len(ks)]
+    for a in ks:
+        cells = [f"{len(held[a] & held[b]) / max(1, min(len(held[a]), len(held[b]))):.0%}" if a != b else "" for b in ks]
+        lines.append(f"| {a} | {len(held[a])} | " + " | ".join(cells) + " |")
+    S = sig
+    combos = [("P1 S2 SPXL만", [S["S2 (b32) SPXL"]], False),
+              ("P2 S2 SPXL + D3 TQQQ", [S["S2 (b32) SPXL"], S["D3 (b31) TQQQ"]], False),
+              ("P3 S2 SPXL + S2 TQQQ", [S["S2 (b32) SPXL"], S["S2 (b32) TQQQ"]], False),
+              ("P4 S2 SPXL + D3 TQQQ + R1 SPXL", [S["S2 (b32) SPXL"], S["D3 (b31) TQQQ"], S["R1 (b29) SPXL"]], False),
+              ("P5 S2 SPXL + D3 TQQQ + B4 TQQQ", [S["S2 (b32) SPXL"], S["D3 (b31) TQQQ"], S["B4 (b36) TQQQ"]], False),
+              ("P6 A3 실제 3배 (SPY·QQQ·IWM RSI<5)", [S["A3 (b35) 실제 3배"]], False),
+              ("P7 S2 SPXL + D3 TQQQ + I4 SPXL + F2 TQQQ", [S["S2 (b32) SPXL"], S["D3 (b31) TQQQ"], S["I4 (b30) SPXL"],
+                                                          S["F2 (b28) TQQQ"]], False),
+              ("P8 가족 전부 (R1·D3·D4·S2×2·A3·B4)", [S[k] for k in ks if k[:2] in ("R1", "D3", "D4", "S2", "A3", "B4")], False),
+              ("참고 K3 (b29x): R1 + I4 + F2", [S["R1 (b29) SPXL"], S["I4 (b30) SPXL"], S["F2 (b28) TQQQ"]], False)]
+    lines += ["", "## 한 계좌 성적 (2011~2026-03)", ""]
+    a_lines, series = acct_table(book, combos, start=start)
+    lines += a_lines
+    lines += ["", "## 2020년 빼고 (그해 수익을 0으로)", "", "| 조합 | 비용 | 연수익 | 최대낙폭 |", "|---|---|---|---|"]
+    for (n, c), r in series.items():
+        r2 = r.copy()
+        r2[r2.index.year == 2020] = 0.0
+        m = portfolio.stats(r2)
+        lines.append(f"| {n} | {c} | {pct(m['cagr'], 1)} | {pct(m['mdd'], 1)} |")
+    spy = book.tab["SPY"]
+    sp = pd.Series(spy.c.to_numpy(), index=pd.to_datetime(spy.d)).pct_change().fillna(0.0)
+    sp = sp[sp.index > pd.Timestamp(start)]
+    sp2 = sp.copy()
+    sp2[sp2.index.year == 2020] = 0.0
+    m = portfolio.stats(sp2)
+    lines.append(f"| SPY 그냥 보유 | | {pct(m['cagr'], 1)} | {pct(m['mdd'], 1)} |")
+    lines += ["", "## 해마다", "", *yearly_series(series, [("P2 S2 SPXL + D3 TQQQ", COST_LEVELS[0][0]), ("P2 S2 SPXL + D3 TQQQ", COST_LEVELS[1][0]),
+                                                         ("P8 가족 전부 (R1·D3·D4·S2×2·A3·B4)", COST_LEVELS[0][0]),
+                                                         ("P8 가족 전부 (R1·D3·D4·S2×2·A3·B4)", COST_LEVELS[1][0])], book, start)]
+    # 합성 3배로 긴 기간 (1995~, b35 A3는 7개 자산 모두)
+    L = {"S2": pick(t32, "S2", "SPY", "syn3"), "D3": pick(t31, "D3", "QQQ", "syn3"), "A3": t35[(t35.variant == "A3") & (t35.kind == "syn3")],
+         "R1": pick(t29, "R1", "SPY", "syn3")}
+    lines += ["", "## 긴 기간: 합성 3배 (1995~)", ""]
+    st2 = dt.date(1995, 1, 1)
+    l_lines, _ = acct_table(book, [("L1 S2 SPY×3", [L["S2"][L["S2"].d >= st2]], False),
+                                    ("L2 S2 SPY×3 + D3 QQQ×3", [L["S2"][L["S2"].d >= st2], L["D3"][L["D3"].d >= st2]], False),
+                                    ("L3 A3 7개 자산×3", [L["A3"][L["A3"].d >= st2]], False),
+                                    ("L4 S2 + D3 + A3", [x[x.d >= st2] for x in (L["S2"], L["D3"], L["A3"])], False)], start=st2)
+    lines += l_lines
+    return pd.concat([t29, t31, t32], ignore_index=True), lines
+
+
+RULE_TICKERS = {"b34": ["SPY"] + SECTORS, "b35": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"],
+                "b31x": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"]}
 
 
 RULES = {"b26": rule_b26, "b27": rule_b27, "b28": rule_b28, "b29": rule_b29, "b30": rule_b30, "b29x": rule_b29x, "b31": rule_b31, "b32": rule_b32, "b33": rule_b33,
-         "b34": rule_b34, "b35": rule_b35, "b36": rule_b36, "b37": rule_b37, "b38": rule_b38, "b39": rule_b39, "b40": rule_b40}
+         "b34": rule_b34, "b35": rule_b35, "b36": rule_b36, "b37": rule_b37, "b38": rule_b38, "b39": rule_b39, "b40": rule_b40,
+         "b31x": rule_b31x}
 
 
 def main():
