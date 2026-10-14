@@ -14,7 +14,7 @@ SYN_DAILY_COST = 0.0002
 
 def daily_table(bars, half):
     """bars: 정규장 1분봉 DataFrame(ticker, d, mi, o, h, l, c, v). half: 반나절 장 날짜 집합.
-    -> 종목별 하루 표 (ticker, d, o, h, l, c, cd, hd, ld): c = 마감 종가, cd/hd/ld = 판단 시각까지의 종가·고가·저가."""
+    -> 종목별 하루 표 (ticker, d, o, h, l, c, cd, hd, ld): c = 마감 종가, cd/hd/ld/vd = 판단 시각까지의 종가·고가·저가·거래량."""
     b = bars[bars.mi >= 0]
     is_half = b.d.isin(half)
     close_mi = np.where(is_half, HALF_CLOSE, CLOSE)
@@ -23,7 +23,8 @@ def daily_table(bars, half):
     upto_d = b[b.mi <= decide_mi]
     g = upto_c.groupby(["ticker", "d"], sort=False)
     out = g.agg(o=("o", "first"), h=("h", "max"), l=("l", "min"), c=("c", "last"), last_mi=("mi", "max")).reset_index()
-    gd = upto_d.groupby(["ticker", "d"], sort=False).agg(cd=("c", "last"), hd=("h", "max"), ld=("l", "min")).reset_index()
+    gd = upto_d.groupby(["ticker", "d"], sort=False).agg(cd=("c", "last"), hd=("h", "max"), ld=("l", "min"),
+                                                                vd=("v", "sum")).reset_index()
     out = out.merge(gd, on=["ticker", "d"], how="left")
     out["half"] = out.d.isin(half)
     # 마감 직전 자료가 없는 날(15:50 전에 끝난 자료)은 마감가를 믿을 수 없어서 뺀다
