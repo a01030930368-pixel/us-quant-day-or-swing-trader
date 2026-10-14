@@ -35,11 +35,12 @@ class Book:
     def __init__(self, bars):
         spy_last = bars[bars.ticker == "SPY"].groupby("d").mi.max()
         self.half = set(spy_last.index[spy_last <= HALF_MAX_MI])
-        t = short.daily_table(bars, self.half)
+        t, self.splits = short.split_adjust(short.daily_table(bars, self.half))
         self.tab = {tk: g.reset_index(drop=True) for tk, g in t.groupby("ticker", sort=False)}
         self.idx = {tk: {d: i for i, d in enumerate(g.d)} for tk, g in self.tab.items()}
         self.cal = list(self.tab["SPY"].d)
-        self.bars = bars
+        self._base = {}
+        self.by_day = {k: (g.mi.to_numpy(), g.c.to_numpy()) for k, g in bars.groupby(["ticker", "d"], sort=False)}
 
     def legs(self, base, i, j):
         """기초 ETF i일 종가 매수 -> j일 종가 매도의 세 가지 수익과 날마다 수익(계좌 계산용)."""
@@ -57,10 +58,37 @@ class Book:
                 out["real3"] = (short.hold_return(cl, a, b), ds, cl[a + 1:b + 1] / cl[a:b] - 1)
         return out
 
+    def baseline(self, base, kind, n, since=None):
+        """아무 날에나 사서 n거래일 들고 있었을 때의 평균 (같은 종목, 같은 기간). 신호가 시장 평균보다 나은지 보려고."""
+        key = (base, kind, n, since)
+        if key not in self._base:
+            if kind == "real3":
+                tk = PAIRS[base]
+                if tk not in self.tab:
+                    self._base[key] = np.nan
+                    return np.nan
+                g = self.tab[tk]
+            else:
+                g = self.tab[base]
+            c = g.c.to_numpy()
+            ok = np.ones(len(c) - n, bool) if since is None else (pd.to_datetime(g.d[:len(c) - n]).dt.year >= since).to_numpy()
+            if kind == "syn3":
+                r = c[1:] / c[:-1] - 1
+                lg = np.r_[0.0, np.cumsum(np.log1p(3 * r))]
+                v = np.exp(lg[n:] - lg[:-n]) - 1 - short.SYN_DAILY_COST * n
+            else:
+                v = c[n:] / c[:-n] - 1
+            self._base[key] = float(v[ok].mean())
+        return self._base[key]
+
     def price_before(self, tk, d, mi):
         """그날 mi분 전 마지막 1분봉 종가."""
-        x = self.bars[(self.bars.ticker == tk) & (self.bars.d == d) & (self.bars.mi < mi)]
-        return float(x.c.iloc[-1]) if len(x) else None
+        x = self.by_day.get((tk, d))
+        if x is None:
+            return None
+        k = np.searchsorted(x[0], mi) - 1
+        f = self.tab[tk].f.iloc[self.idx[tk][d]] if d in self.idx[tk] else 1.0
+        return float(x[1][k]) * f if k >= 0 else None
 
 
 def make_rows(book, base, entries, variant):
@@ -85,18 +113,21 @@ def pct(x, k=2):
     return "" if x is None or (isinstance(x, float) and np.isnan(x)) else f"{x * 100:.{k}f}%"
 
 
-HEAD = ("| 변형 | 종목 | 기간 | 거래 수 | 평균 보유일 | 비용 전 평균 | 중앙값 | 승률 | t값 | 상위 10개 뺀 평균 | 비용 후 (왕복 0.7%) "
-        "| 비용 후 (왕복 0.54%) | 2010~ 평균 | 2018~ 평균 | 관문 |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+HEAD = ("| 변형 | 종목 | 기간 | 거래 수 | 평균 보유일 | 비용 전 평균 | **아무 날이나 같은 일수 보유** | 중앙값 | 승률 | t값 | 상위 10개 뺀 평균 "
+        "| 비용 후 (왕복 0.7%) | 비용 후 (왕복 0.54%) | 2010~ 평균 | 2018~ 평균 | 관문 |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 
 
 def label(base, kind):
     return base if kind == "1x" else (f"{base}×3 합성" if kind == "syn3" else PAIRS[base])
 
 
+BOOK = None
+
+
 def row(name, s, min_n=30):
     if not len(s):
-        return f"| {name} | | | 0 |" + " |" * 11, False
+        return f"| {name} | | | 0 |" + " |" * 12, False
     g = s.gross.reset_index(drop=True)
     yr = pd.to_datetime(s.d).dt.year.reset_index(drop=True)
     top = g.sort_values().iloc[:-10].mean() if len(g) > 20 else np.nan
@@ -104,7 +135,8 @@ def row(name, s, min_n=30):
     verdict = "표본 부족" if len(g) < min_n else ("통과" if ok else "탈락")
     base, kind = s.base.iloc[0], s.kind.iloc[0]
     span = f"{yr.min()}~{yr.max()}"
-    return (f"| {name} | {label(base, kind)} | {span} | {len(g)} | {s.days.mean():.1f} | {pct(g.mean())} | {pct(g.median())} | "
+    bl = BOOK.baseline(base, kind, max(1, int(round(s.days.mean()))), since=int(yr.min())) if BOOK is not None else np.nan
+    return (f"| {name} | {label(base, kind)} | {span} | {len(g)} | {s.days.mean():.1f} | {pct(g.mean())} | {pct(bl)} | {pct(g.median())} | "
             f"{(g > 0).mean():.0%} | {tstat(g):.2f} | {pct(top)} | {pct(portfolio.net_return(g, COST).mean())} | "
             f"{pct(portfolio.net_return(g, COST_REF).mean())} | {pct(g[yr >= 2010].mean())} | {pct(g[yr >= 2018].mean())} | {verdict} |"), ok
 
@@ -446,7 +478,10 @@ def main():
     bars = load(a.prep, ["SPY", "QQQ", "IWM", "SPXL", "BGU", "TQQQ", "TNA"])
     bars = bars[bars.mi >= 0]
     book = Book(bars)
+    global BOOK
+    BOOK = book
     print("tickers:", {tk: (str(g.d.iloc[0]), str(g.d.iloc[-1]), len(g)) for tk, g in book.tab.items()}, flush=True)
+    print("splits:", [(tk, str(d), k) for tk, d, k in book.splits], flush=True)
     t, lines = RULES[a.rule](book)
     t.drop(columns=["path", "path_d"]).to_csv(os.path.join(out, "trades.csv.gz"), index=False)
     text = "\n".join(lines) + "\n"

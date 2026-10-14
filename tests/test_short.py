@@ -49,3 +49,14 @@ def test_daily_table_decide_vs_close():
     b = pd.DataFrame(rows, columns=["ticker", "d", "mi", "o", "h", "l", "c", "v"])
     t = short.daily_table(b, set())
     assert t.c.iloc[0] == 105 and t.cd.iloc[0] == 100
+
+
+def test_split_adjust():
+    t = pd.DataFrame({"ticker": "X", "d": [1, 2, 3, 4], "o": [100, 101, 34, 35.0], "h": [101, 102, 35, 36.0],
+                      "l": [99, 100, 33, 34.0], "c": [100, 102, 34.5, 35.0]})
+    for col in ("cd", "hd", "ld"):
+        t[col] = t[{"cd": "c", "hd": "h", "ld": "l"}[col]]
+    a, found = short.split_adjust(t)
+    assert found == [("X", 3, 3)]
+    assert np.allclose(a.c, [100 / 3, 34, 34.5, 35])
+    assert np.allclose(a.f, [1 / 3, 1 / 3, 1, 1])

@@ -32,6 +32,35 @@ def daily_table(bars, half):
     return out.sort_values(["ticker", "d"]).reset_index(drop=True)
 
 
+SPLIT_RATIOS = (2, 3, 4, 5, 8, 10, 20)  # 1.5는 3배 ETF의 큰 갭(-33%)과 헷갈려서 뺌
+
+
+def split_adjust(t):
+    """자료 가격이 분할 반영 전이라, 전날 종가 대비 오늘 시가가 분할 비율(±3%)이면 분할로 보고
+    그 전 가격을 모두 나눠 맞춘다. f = 그날 가격에 곱할 값. 분할로 본 날 목록도 돌려줌."""
+    out, found = [], []
+    for tk, g in t.groupby("ticker", sort=False):
+        g = g.copy()
+        r = (g.o / g.c.shift()).to_numpy()
+        step = np.ones(len(g))
+        for i in range(1, len(g)):
+            for k in SPLIT_RATIOS:
+                if abs(r[i] * k - 1) < 0.03:
+                    step[i] = k
+                elif abs(r[i] / k - 1) < 0.03:
+                    step[i] = 1 / k
+            if step[i] != 1:
+                found.append((tk, g.d.iloc[i], step[i]))
+        # i일 전 가격은 i일 이후 모든 분할만큼 나눔
+        f = np.r_[np.cumprod(step[::-1])[::-1][1:], 1.0]
+        f = 1 / f
+        for col in ("o", "h", "l", "c", "cd", "hd", "ld"):
+            g[col] = g[col] * f
+        g["f"] = f
+        out.append(g)
+    return pd.concat(out, ignore_index=True), found
+
+
 def rsi_wilder(close, n=2):
     """윌더 방식 RSI. close: 1차원 배열."""
     c = np.asarray(close, float)
