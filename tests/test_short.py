@@ -1,0 +1,90 @@
+import numpy as np
+import pandas as pd
+
+from daytrade import short
+
+
+def test_decision_rsi_matches_wilder_when_decide_price_is_close():
+    rng = np.random.default_rng(0)
+    c = 100 * np.cumprod(1 + rng.normal(0, 0.01, 300))
+    g = pd.DataFrame({"c": c, "cd": c, "hd": c * 1.01, "ld": c * 0.99})
+    x = short.decision_series(g)
+    ref = short.rsi_wilder(c, 2)
+    ok = ~np.isnan(ref) & ~np.isnan(x.rsi2.to_numpy())
+    assert ok.sum() > 290
+    assert np.allclose(x.rsi2.to_numpy()[ok], ref[ok])
+    assert np.isclose(x.sma200.iloc[-1], c[-200:].mean())
+    assert np.isclose(x.sma5.iloc[-1], c[-5:].mean())
+    assert np.isnan(x.sma200.iloc[198]) and not np.isnan(x.sma200.iloc[199])
+
+
+def test_decision_uses_decide_price_not_close():
+    c = np.array([10, 11, 12, 13, 14, 15.0])
+    cd = c.copy()
+    cd[-1] = 9.0  # 판단 시각엔 크게 떨어져 있었음
+    g = pd.DataFrame({"c": c, "cd": cd, "hd": c + 1, "ld": np.minimum(c, cd) - 0.0})
+    x = short.decision_series(g)
+    assert x.rsi2.iloc[-1] < 30
+    assert np.isclose(x.sma5.iloc[-1], (11 + 12 + 13 + 14 + 9) / 5)
+    assert np.isclose(x.ibs.iloc[-1], 0.0)
+
+
+def test_synthetic_and_exits():
+    c = np.array([100, 101, 99, 102.0])
+    r = short.synthetic_return(c, 0, 2)
+    assert np.isclose(r, (1 + 0.03) * (1 + 3 * (99 / 101 - 1)) - 1 - 0.0004)
+    assert np.isclose(short.hold_return(c, 0, 3), 0.02)
+    cd = np.array([10, 9, 9.5, 11, 12.0])
+    sma5 = np.array([np.nan, 10, 10, 10, 10])
+    assert short.exit_rsi(cd, sma5, 0) == 3
+    assert short.exit_rsi(cd, sma5, 0, max_days=2) == 2
+    assert short.exit_ibs(np.array([0.1, 0.5, 0.8, 0.9]), 0) == 2
+    assert short.exit_ibs(np.array([0.1, 0.5, 0.6]), 0) == 2  # 자료 끝
+
+
+def test_daily_table_decide_vs_close():
+    rows = []
+    for mi in range(0, 390):
+        rows.append(("SPY", "2020-01-02", mi, 100, 101, 99, 100 + (5 if mi > 385 else 0), 1))
+    b = pd.DataFrame(rows, columns=["ticker", "d", "mi", "o", "h", "l", "c", "v"])
+    t = short.daily_table(b, set())
+    assert t.c.iloc[0] == 105 and t.cd.iloc[0] == 100
+
+
+def test_split_adjust():
+    t = pd.DataFrame({"ticker": "X", "d": [1, 2, 3, 4], "o": [100, 101, 34, 35.0], "h": [101, 102, 35, 36.0],
+                      "l": [99, 100, 33, 34.0], "c": [100, 102, 34.5, 35.0]})
+    for col in ("cd", "hd", "ld"):
+        t[col] = t[{"cd": "c", "hd": "h", "ld": "l"}[col]]
+    a, found = short.split_adjust(t)
+    assert found == [("X", 3, 3)]
+    assert np.allclose(a.c, [100 / 3, 34, 34.5, 35])
+    assert np.allclose(a.f, [1 / 3, 1 / 3, 1, 1])
+
+
+def test_exit_rsi_stop():
+    cd = np.array([100, 98, 96, 94, 99, 101.0])
+    sma5 = np.array([np.nan, 99, 99, 99, 98, 99.0])
+    assert short.exit_rsi_stop(cd, sma5, 0, 100, 0.05) == 3  # 94 <= 95: 손절
+    assert short.exit_rsi_stop(cd, sma5, 0, 100, 0.10) == 4  # 99 > 98: 보통 청산
+
+
+def test_combine_daily():
+    days = ["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-04"]
+    tr = [("SPXL", ["2020-01-02", "2020-01-03"], [0.03, -0.03]), ("TQQQ", ["2020-01-03"], [0.06])]
+    idle = {d: 0.01 for d in days}
+    r = short.combine_daily(tr, days, 0.0, idle)
+    assert np.allclose(r.to_numpy(), [0.01, 0.03, 0.015, 0.01])
+    r = short.combine_daily(tr, days, 0.001, None)
+    # 2일: 0 -> SPXL 1 (회전 1), 3일: SPXL .5 TQQQ .5 (회전 1), 4일: 모두 팔기 (회전 1)
+    assert np.allclose(r.to_numpy(), [0.0, 0.03 - 0.001, 0.015 - 0.001, -0.001])
+
+
+def test_first_true_and_window():
+    cond = np.array([False, False, True, False])
+    assert short.first_true(cond, 0, 10) == 2
+    assert short.first_true(cond, 0, 1) == 1
+    c = np.array([1, 2, 3, 4.0])
+    cd = np.array([1, 2, 3, 0.0])
+    mean, sd, lo, hi = short.decision_window(c, cd, 3)
+    assert np.isnan(mean[1]) and mean[2] == 2 and lo[3] == 0 and hi[3] == 3

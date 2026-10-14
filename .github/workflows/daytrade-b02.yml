@@ -1,0 +1,69 @@
+# 데이트레이딩 규칙서 b02 백테스트 (주목 종목 시가 범위 돌파) (무료 1분봉 mito0o852/OHLCV-1m, 2018-01 ~ 2026-03).
+# 1) prep: 해마다 월 파일을 받아 상대거래량 상위 종목-날짜의 1분봉과 지표(14일 ATR·평균 거래량, 시간창별 상대거래량)를 뽑는다. 캐시에 남긴다.
+# 2) backtest: O1~O8을 계산한다. 결과는 Summary와 첨부파일(b02-report)에 남는다.
+name: daytrade-b02
+on:
+  push:
+    branches: [claude/daytrade-b01-8wz04e]
+    paths: [daytrade/prep_b02.py, daytrade/b02.py, scripts/run_b02.py, .github/workflows/daytrade-b02.yml]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q tests
+  prep:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        year: [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: prep_b02
+          key: b02-prep-${{ matrix.year }}-${{ hashFiles('daytrade/prep.py', 'daytrade/prep_b02.py') }}
+      - uses: actions/setup-python@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.12"
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: pip install -r requirements.txt
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: python daytrade/prep_b02.py --year ${{ matrix.year }} --out prep_b02
+      - run: ls -la prep_b02
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b02-prep-${{ matrix.year }}
+          path: prep_b02
+          retention-days: 7
+  backtest:
+    needs: prep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: b02-prep-*
+          path: prep_b02
+          merge-multiple: true
+      - run: python scripts/run_b02.py --prep prep_b02 --out reports/b02
+      - run: cat reports/b02/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b02-report
+          path: reports/b02

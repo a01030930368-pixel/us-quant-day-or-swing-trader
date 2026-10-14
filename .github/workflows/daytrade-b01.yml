@@ -1,0 +1,69 @@
+# 데이트레이딩 규칙서 b01 백테스트 (무료 1분봉 mito0o852/OHLCV-1m, 2018-01 ~ 2026-03).
+# 1) prep: 해마다 월 파일(약 0.4GB씩)을 받아 후보 종목-날짜의 1분봉만 뽑는다. 결과는 캐시에 남겨 다음 실행 때 다시 받지 않는다.
+# 2) backtest: 뽑아 둔 자료로 D1~D6과 민감도를 계산한다. 결과는 Summary와 첨부파일(b01-report)에 남는다.
+name: daytrade-b01
+on:
+  push:
+    branches: [claude/daytrade-b01-8wz04e]
+    paths: [daytrade/prep.py, daytrade/b01.py, daytrade/portfolio.py, scripts/run_daytrade.py, .github/workflows/daytrade-b01.yml]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q tests
+  prep:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        year: [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: prep
+          key: b01-prep-${{ matrix.year }}-${{ hashFiles('daytrade/prep.py') }}
+      - uses: actions/setup-python@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.12"
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: pip install -r requirements.txt
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: python daytrade/prep.py --year ${{ matrix.year }} --out prep
+      - run: ls -la prep
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prep-${{ matrix.year }}
+          path: prep
+          retention-days: 7
+  backtest:
+    needs: prep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: prep-*
+          path: prep
+          merge-multiple: true
+      - run: python scripts/run_daytrade.py --prep prep --out reports/b01
+      - run: cat reports/b01/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b01-report
+          path: reports/b01
