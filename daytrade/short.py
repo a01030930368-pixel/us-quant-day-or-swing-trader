@@ -178,3 +178,23 @@ def combine_daily(trades, days, cost, idle=None):
         ret[k] = r - cost * turn
         prev_w = w
     return pd.Series(ret, index=pd.to_datetime(days))
+
+
+def first_true(cond, i, max_days):
+    """i일 매수 뒤 cond가 처음 참인 날, 없으면 max_days일째 (자료 끝이면 마지막 날)."""
+    n = len(cond)
+    for j in range(i + 1, min(i + max_days, n - 1) + 1):
+        if cond[j]:
+            return j
+    return min(i + max_days, n - 1)
+
+
+def decision_window(c, cd, k):
+    """전날까지 k-1개 종가 + 오늘 판단가로 만든 k일 창의 평균·표준편차·최저·최고."""
+    c, cd = np.asarray(c, float), np.asarray(cd, float)
+    m = len(c)
+    mean, sd, lo, hi = (np.full(m, np.nan) for _ in range(4))
+    for i in range(k - 1, m):
+        w = np.r_[c[i - k + 1:i], cd[i]]
+        mean[i], sd[i], lo[i], hi[i] = w.mean(), w.std(ddof=0), w.min(), w.max()
+    return mean, sd, lo, hi

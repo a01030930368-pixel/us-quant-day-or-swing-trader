@@ -78,3 +78,13 @@ def test_combine_daily():
     r = short.combine_daily(tr, days, 0.001, None)
     # 2일: 0 -> SPXL 1 (회전 1), 3일: SPXL .5 TQQQ .5 (회전 1), 4일: 모두 팔기 (회전 1)
     assert np.allclose(r.to_numpy(), [0.0, 0.03 - 0.001, 0.015 - 0.001, -0.001])
+
+
+def test_first_true_and_window():
+    cond = np.array([False, False, True, False])
+    assert short.first_true(cond, 0, 10) == 2
+    assert short.first_true(cond, 0, 1) == 1
+    c = np.array([1, 2, 3, 4.0])
+    cd = np.array([1, 2, 3, 0.0])
+    mean, sd, lo, hi = short.decision_window(c, cd, 3)
+    assert np.isnan(mean[1]) and mean[2] == 2 and lo[3] == 0 and hi[3] == 3

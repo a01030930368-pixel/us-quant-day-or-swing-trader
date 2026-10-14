@@ -43,7 +43,10 @@ class Book:
         # 종목 줄 번호 -> SPY 거래일 번호 (QQQ는 2004~2011년 이름이 QQQQ라 자료가 비어 있음: 빈 곳을 건너는 거래는 버림)
         spy_pos = {d: i for i, d in enumerate(self.cal)}
         self.pos = {tk: np.array([spy_pos.get(d, -10 ** 6) for d in g.d]) for tk, g in self.tab.items()}
-        self.by_day = {k: (g.mi.to_numpy(), g.c.to_numpy()) for k, g in bars.groupby(["ticker", "d"], sort=False)}
+        # 1분봉은 FOMC 발표 직전 가격에만 씀: 기초 ETF와 3배 ETF만 남김 (메모리 절약)
+        keep = set(PAIRS) | set(PAIRS.values())
+        bb = bars[bars.ticker.isin(keep)]
+        self.by_day = {k: (g.mi.to_numpy(), g.c.to_numpy()) for k, g in bb.groupby(["ticker", "d"], sort=False)}
 
     def continuous(self, tk, i, j):
         p = self.pos[tk]
@@ -59,7 +62,7 @@ class Book:
         out = {"1x": (short.hold_return(c, i, j), ds, c[i + 1:j + 1] / c[i:j] - 1)}
         r1 = c[i + 1:j + 1] / c[i:j] - 1
         out["syn3"] = (short.synthetic_return(c, i, j), ds, 3 * r1 - short.SYN_DAILY_COST)
-        lev = PAIRS[base]
+        lev = PAIRS.get(base)
         if lev in self.idx:
             a, b = self.idx[lev].get(ds[0]), self.idx[lev].get(ds[-1])
             if a is not None and b is not None and b - a == j - i and self.continuous(lev, a, b):
@@ -72,7 +75,7 @@ class Book:
         key = (base, kind, n, since)
         if key not in self._base:
             if kind == "real3":
-                tk = PAIRS[base]
+                tk = PAIRS.get(base)
                 if tk not in self.tab:
                     self._base[key] = np.nan
                     return np.nan
@@ -130,7 +133,7 @@ HEAD = ("| 변형 | 종목 | 기간 | 거래 수 | 평균 보유일 | 비용 전
 
 
 def label(base, kind):
-    return base if kind == "1x" else (f"{base}×3 합성" if kind == "syn3" else PAIRS[base])
+    return base if kind == "1x" else (f"{base}×3 합성" if kind == "syn3" else PAIRS.get(base, f"{base}×3"))
 
 
 BOOK = None
@@ -484,7 +487,7 @@ COST_LEVELS = (("표준 0.25%+0.1%", 0.0035), ("이벤트 0.07%+0.1%", 0.0017), 
 
 
 def inst(base, kind):
-    return {"1x": base, "syn3": f"{base}×3", "real3": PAIRS[base]}[kind]
+    return {"1x": base, "syn3": f"{base}×3", "real3": PAIRS.get(base, f"{base}×3")}[kind]
 
 
 def pick(t, v, base, kind):
@@ -627,7 +630,353 @@ def rule_b29x(book):
     return pd.concat([t, t28[t28.variant.isin(["F1", "F2"])], t30[t30.variant == "I4"]], ignore_index=True), lines
 
 
-RULES = {"b26": rule_b26, "b27": rule_b27, "b28": rule_b28, "b29": rule_b29, "b30": rule_b30, "b29x": rule_b29x}
+# ---------------------------------------------------------------- b31~b40 짧은 보유 모음 2
+SECTORS = ["XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB"]
+ASSETS = ["SPY", "QQQ", "IWM", "TLT", "GLD", "EFA", "EEM"]
+INCEPTION2 = {**{t: "1998-12-22" for t in SECTORS}, "TLT": "2002-07-30", "GLD": "2004-11-18", "EFA": "2001-08-27",
+              "EEM": "2003-04-14"}
+_IND = {}
+
+
+def ind(book, base):
+    """판단용 지표 묶음 (판단가 cd = 15:55 가격을 오늘 종가 자리에)."""
+    if base not in _IND:
+        g = book.tab[base]
+        x = short.decision_series(g)
+        c, cd = g.c.to_numpy(float), g.cd.to_numpy(float)
+        z = dict(g=g, c=c, cd=cd, o=g.o.to_numpy(float), rsi=x.rsi2.to_numpy(), rsi_c=short.rsi_wilder(c, 2),
+                 sma200=x.sma200.to_numpy(), sma5=x.sma5.to_numpy())
+        z["prev_c"] = np.r_[np.nan, c[:-1]]
+        z["up200"] = cd > z["sma200"]
+        for k in (5, 7, 10, 20):
+            z[f"m{k}"], z[f"sd{k}"], z[f"lo{k}"], z[f"hi{k}"] = short.decision_window(c, cd, k)
+        sma200_c = pd.Series(c).rolling(200).mean().to_numpy()
+        z["up200_prev"] = np.r_[False, (c > sma200_c)[:-1]]  # 전날 종가가 200일 평균 위 (시가 매수용)
+        _IND[base] = z
+    return _IND[base]
+
+
+def trades_from(book, base, enter, exit_at, variant):
+    """enter: 판단일 bool 배열, exit_at(i) -> 매도 줄 번호. 한 번에 한 거래."""
+    n = len(book.tab[base])
+    entries, busy = [], -1
+    for i in np.nonzero(enter)[0]:
+        if i <= busy or i >= n - 1:
+            continue
+        j = exit_at(i)
+        entries.append((i, j, {}))
+        busy = j - 1
+    return make_rows(book, base, entries, variant)
+
+
+def custom_rows(book, base, i, j, variant, start="close", end="close"):
+    """start/end = 'open' 또는 'close'. i일 시가/종가 매수 -> j일 시가/종가 매도."""
+    g = book.tab[base]
+    if i < 1 or j >= len(g) or j < i or (start == "close" and j == i) or not book.continuous(base, i, j):
+        return []
+
+    def path(o, c):
+        steps = []
+        prev = o[i] if start == "open" else c[i]
+        first = i if start == "open" else i + 1
+        for k in range(first, j + 1):
+            last = o[k] if (k == j and end == "open") else c[k]
+            steps.append(last / prev - 1)
+            prev = c[k]
+        return np.array(steps)
+    first = i if start == "open" else i + 1
+    ds = list(g.d[first:j + 1])
+    out = {"1x": path(g.o.to_numpy(float), g.c.to_numpy(float))}
+    out["syn3"] = 3 * out["1x"] - short.SYN_DAILY_COST
+    lev = PAIRS.get(base)
+    if lev in book.idx:
+        a, b = book.idx[lev].get(g.d[i]), book.idx[lev].get(g.d[j])
+        if a is not None and b is not None and b - a == j - i and book.continuous(lev, a, b):
+            lt = book.tab[lev]
+            lo, lc = lt.o.to_numpy(float), lt.c.to_numpy(float)
+            steps, prev = [], lo[a] if start == "open" else lc[a]
+            for k in range(a if start == "open" else a + 1, b + 1):
+                last = lo[k] if (k == b and end == "open") else lc[k]
+                steps.append(last / prev - 1)
+                prev = lc[k]
+            out["real3"] = np.array(steps)
+    return [dict(variant=variant, base=base, kind=kind, d=g.d[i], exit_d=g.d[j], days=max(j - i, 1),
+                 gross=float(np.prod(1 + pth) - 1), path=pth, path_d=ds) for kind, pth in out.items() if len(pth)]
+
+
+def report(title, note, t, names, bases=("SPY", "QQQ", "IWM"), acct=None, pooled=False):
+    lines = [f"# {title}", "", note + " " + COMMON_NOTE, ""]
+    g_lines, _ = gate_table(t, names, bases)
+    lines += g_lines
+    if pooled:
+        lines += ["## 종목 모두 합쳐서 (비용 전)", "", "| 변형 | 종류 | 거래 수 | 평균 | 중앙값 | 승률 | t값 | 상위 10개 뺀 평균 | 2018~ 평균 |",
+                  "|---|---|---|---|---|---|---|---|---|"]
+        for v in names:
+            for kind in ("1x", "syn3", "real3"):
+                s_ = t[(t.variant == v) & (t.kind == kind)]
+                if not len(s_):
+                    continue
+                g = s_.gross
+                yr = pd.to_datetime(s_.d).dt.year
+                lines.append(f"| {names[v]} | {KIND_NAME[kind]} | {len(g)} | {pct(g.mean())} | {pct(g.median())} | {(g > 0).mean():.0%} | "
+                             f"{tstat(g):.2f} | {pct(g.sort_values().iloc[:-10].mean()) if len(g) > 20 else ''} | {pct(g[yr >= 2018].mean())} |")
+        lines.append("")
+    if "syn3" in set(t.kind):
+        lines += period_table(t, names, "syn3") + [""]
+    lines += period_table(t, names, "1x") + [""]
+    if acct:
+        lines += ["## 계좌 기준 (신호 때 계좌 100%, 여러 신호면 나눔, 신호 없으면 현금)", ""]
+        a_lines, _ = acct_table(BOOK, acct)
+        lines += a_lines
+    return lines
+
+
+def std_acct(t, variants, bases=("SPY", "QQQ")):
+    out = []
+    for v in variants:
+        for b in bases:
+            for kind in ("real3", "syn3"):
+                s_ = pick(t, v, b, kind)
+                if len(s_):
+                    out.append((f"{v} {label(b, kind)}", [s_], False))
+    return out
+
+
+def rule_b31(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        down = z["cd"] < z["prev_c"]  # 오늘 (판단가)
+        cdn = z["c"] < z["prev_c"]  # 지난날들 (종가)
+        lag = lambda k: np.r_[np.zeros(k, bool), cdn[:-k]]  # noqa: E731
+        streak3 = down & lag(1) & lag(2)
+        streak4 = streak3 & lag(3)
+        upc = z["cd"] > z["prev_c"]
+        ex_up = lambda i: short.first_true(upc, i, 10)  # noqa: E731
+        ex_s5 = lambda i: short.first_true(z["cd"] > z["sma5"], i, 10)  # noqa: E731
+        for v, en, ex in (("D1", streak3 & z["up200"], ex_up), ("D2", streak4 & z["up200"], ex_up),
+                          ("D3", streak3, ex_up), ("D4", streak3 & z["up200"], ex_s5)):
+            rows += trades_from(book, base, en, ex, v)
+    t = pd.DataFrame(rows)
+    names = {"D1": "D1 기본: 3일 연속 하락 마감 + 200일 위 → 첫 상승 마감 (최대 10일)", "D2": "D2 4일 연속",
+             "D3": "D3 200일 조건 없이", "D4": "D4 5일 평균 위 마감에 매도"}
+    return t, report("b31 백테스트 결과: 연속 하락 반등", "오늘 하락 = 판단가 < 전날 종가, 그 전 날들은 종가 기준.", t, names,
+                     acct=std_acct(t, names))
+
+
+def rule_b32(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        for v, k, mx in (("S1", 7, 15), ("S2", 5, 15), ("S3", 10, 15), ("S4", 7, 7)):
+            en = (z["cd"] <= z[f"lo{k}"]) & z["up200"]
+            hi = z["cd"] >= z[f"hi{k}"]
+            rows += trades_from(book, base, en, lambda i, hi=hi, mx=mx: short.first_true(hi, i, mx), v)
+    t = pd.DataFrame(rows)
+    names = {"S1": "S1 기본: 7일 최저 종가 + 200일 위 → 7일 최고 종가 (최대 15일)", "S2": "S2 5일", "S3": "S3 10일",
+             "S4": "S4 7일, 최대 7일"}
+    return t, report("b32 백테스트 결과: 더블 세븐", "최저·최고 = 전날까지 종가 + 오늘 판단가.", t, names, acct=std_acct(t, names))
+
+
+def rule_b33(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        r, rc = z["rsi"], z["rsi_c"]
+        s2 = r + np.r_[np.nan, rc[:-1]]
+        s3 = s2 + np.r_[np.nan, np.nan, rc[:-2]]
+        ex65 = lambda i: short.first_true(z["rsi"] > 65, i, 10)  # noqa: E731
+        ex_s5 = lambda i: short.first_true(z["cd"] > z["sma5"], i, 10)  # noqa: E731
+        for v, en, ex in (("C1", (s2 < 35) & z["up200"], ex65), ("C2", (s3 < 45) & z["up200"], ex65),
+                          ("C3", (s2 < 20) & z["up200"], ex65), ("C4", (s2 < 35) & z["up200"], ex_s5)):
+            rows += trades_from(book, base, en, ex, v)
+    t = pd.DataFrame(rows)
+    names = {"C1": "C1 기본: 2일 RSI(2) 합 < 35 + 200일 위 → RSI(2) > 65 (최대 10일)", "C2": "C2 3일 합 < 45",
+             "C3": "C3 2일 합 < 20", "C4": "C4 5일 평균 위 마감에 매도"}
+    return t, report("b33 백테스트 결과: 누적 RSI(2)", "", t, names, acct=std_acct(t, names))
+
+
+def rsi_pool(book, bases, extra=None):
+    """bases 각각 b29 R1 (RSI(2)<10, 200일 위, 5일 평균 위 마감에 매도, 최대 10일). extra: (이름, 조건 함수)."""
+    rows = []
+    for base in bases:
+        if base not in book.tab or len(book.tab[base]) < 250:
+            continue
+        z = ind(book, base)
+        ex = lambda i, z=z: short.first_true(z["cd"] > z["sma5"], i, 10)  # noqa: E731
+        rows += trades_from(book, base, (z["rsi"] < 10) & z["up200"], ex, "1")
+        rows += trades_from(book, base, (z["rsi"] < 5) & z["up200"], ex, "2")
+        if extra:
+            for v, f in extra:
+                rows += trades_from(book, base, f(base, z), ex, v)
+    return rows
+
+
+def pick_lowest(book, bases, variant):
+    """하루에 RSI(2)가 가장 낮은 신호 종목 1개만, 계좌 전체에 한 번에 한 거래."""
+    cand = {}
+    for base in bases:
+        if base not in book.tab or len(book.tab[base]) < 250:
+            continue
+        z = ind(book, base)
+        for i in np.nonzero((z["rsi"] < 10) & z["up200"])[0]:
+            d = z["g"].d.iloc[i]
+            if d not in cand or z["rsi"][i] < cand[d][2]:
+                cand[d] = (base, i, z["rsi"][i])
+    rows, busy_until = [], None
+    for d in sorted(cand):
+        if busy_until is not None and d < busy_until:
+            continue
+        base, i, _ = cand[d]
+        z = ind(book, base)
+        if i >= len(z["c"]) - 1:
+            continue
+        j = short.first_true(z["cd"] > z["sma5"], i, 10)
+        r = make_rows(book, base, [(i, j, {})], variant)
+        rows += r
+        busy_until = z["g"].d.iloc[j]
+    return rows
+
+
+def rule_b34(book):
+    spy = ind(book, "SPY")
+    spy_up = dict(zip(spy["g"].d, spy["up200"]))
+    extra = [("4", lambda b, z: (z["rsi"] < 10) & z["up200"] & np.array([spy_up.get(d, False) for d in z["g"].d]))]
+    rows = rsi_pool(book, SECTORS, extra)
+    t = pd.DataFrame(rows)
+    t["variant"] = "E" + t.variant
+    t = pd.concat([t, pd.DataFrame(pick_lowest(book, SECTORS, "E3"))], ignore_index=True)
+    names = {"E1": "E1 기본: 섹터 9개 각각 RSI(2) < 10 + 200일 위 → 5일 평균 위 마감", "E2": "E2 RSI(2) < 5",
+             "E3": "E3 하루에 RSI 가장 낮은 1개만 (한 번에 한 거래)", "E4": "E4 E1 + SPY도 200일 위"}
+    acct = [(f"{v} 1배", [t[(t.variant == v) & (t.kind == "1x")]], False) for v in names] + \
+           [(f"{v} 합성 3배", [t[(t.variant == v) & (t.kind == "syn3")]], False) for v in names]
+    return t, report("b34 백테스트 결과: 섹터 ETF RSI(2)", "섹터 SPDR 9개 (1998-12~). 3배 ETF는 없음 → 1배와 합성 3배만.",
+                     t, names, bases=SECTORS, acct=acct, pooled=True)
+
+
+def rule_b35(book):
+    rows = rsi_pool(book, ASSETS)
+    t = pd.DataFrame(rows)
+    t["variant"] = "A" + t.variant.map({"1": "1", "2": "3"})
+    t = pd.concat([t, t[(t.variant == "A1") & t.base.isin(["TLT", "GLD"])].assign(variant="A2"),
+                   t[(t.variant == "A1") & t.base.isin(["SPY", "QQQ", "IWM", "EFA"])].assign(variant="A4")], ignore_index=True)
+    names = {"A1": "A1 기본: 7개 자산 각각 RSI(2) < 10 + 200일 위 → 5일 평균 위 마감", "A2": "A2 TLT·GLD만",
+             "A3": "A3 RSI(2) < 5", "A4": "A4 주식 4개 (SPY·QQQ·IWM·EFA)"}
+    acct = [(f"{v} 1배", [t[(t.variant == v) & (t.kind == "1x")]], False) for v in names] + \
+           [(f"{v} 합성 3배", [t[(t.variant == v) & (t.kind == "syn3")]], False) for v in names] + \
+           [("A1 실제 3배 있는 것만 (SPY·QQQ·IWM)", [t[(t.variant == "A1") & (t.kind == "real3")]], False)]
+    return t, report("b35 백테스트 결과: 여러 자산 RSI(2)", "TLT(채권, 2002~), GLD(금, 2004~), EFA(2001~), EEM(2003~). 3배는 SPY·QQQ·IWM만.",
+                     t, names, bases=ASSETS, acct=acct, pooled=True)
+
+
+def rule_b36(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        m, sd = z["m20"], z["sd20"]
+        ex_m = lambda i: short.first_true(z["cd"] > z["m20"], i, 10)  # noqa: E731
+        ex_s5 = lambda i: short.first_true(z["cd"] > z["sma5"], i, 10)  # noqa: E731
+        for v, en, ex in (("B1", (z["cd"] < m - 2 * sd) & z["up200"], ex_m), ("B2", (z["cd"] < m - 2.5 * sd) & z["up200"], ex_m),
+                          ("B3", z["cd"] < m - 2 * sd, ex_m), ("B4", (z["cd"] < m - 2 * sd) & z["up200"], ex_s5)):
+            rows += trades_from(book, base, en, ex, v)
+    t = pd.DataFrame(rows)
+    names = {"B1": "B1 기본: 20일 평균 - 2표준편차 아래 + 200일 위 → 20일 평균 위 마감 (최대 10일)", "B2": "B2 2.5표준편차",
+             "B3": "B3 200일 조건 없이", "B4": "B4 5일 평균 위 마감에 매도"}
+    return t, report("b36 백테스트 결과: 볼린저 하단 반등", "", t, names, acct=std_acct(t, names))
+
+
+def rule_b37(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        gap = z["o"] / z["prev_c"] - 1
+        for v, th, filt, hold in (("G1", -0.01, True, 0), ("G2", -0.02, True, 0), ("G3", -0.01, False, 0), ("G4", -0.01, True, 1)):
+            en = (gap < th) & (z["up200_prev"] if filt else True)
+            for i in np.nonzero(en)[0]:
+                rows += custom_rows(book, base, i, i + hold, v, start="open", end="close")
+    t = pd.DataFrame(rows)
+    names = {"G1": "G1 기본: 시가가 전날 종가보다 1% 넘게 낮음 + 전날 200일 위 → 시가 매수, 그날 종가 매도",
+             "G2": "G2 갭 -2%", "G3": "G3 200일 조건 없이", "G4": "G4 다음 날 종가까지"}
+    return t, report("b37 백테스트 결과: 큰 갭 다운 메우기", "시가 = 9:30 첫 1분봉 시가 (3배 ETF도 같은 방식).", t, names,
+                     acct=std_acct(t, names))
+
+
+def rule_b38(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        day = z["cd"] / z["prev_c"] - 1
+        for v, en in (("O1", day < -0.01), ("O2", day < -0.02), ("O3", np.isfinite(day)), ("O4", (day < -0.01) & z["up200"])):
+            for i in np.nonzero(en)[0]:
+                rows += custom_rows(book, base, i, i + 1, v, start="close", end="open")
+    t = pd.DataFrame(rows)
+    names = {"O1": "O1 기본: 그날 -1% 넘게 하락 → 종가 매수, 다음 날 시가 매도", "O2": "O2 -2%",
+             "O3": "O3 모든 날 밤 (참고)", "O4": "O4 -1% + 200일 위"}
+    return t, report("b38 백테스트 결과: 하락한 날 밤 보유", "하락 = 판단가 / 전날 종가 - 1.", t, names,
+                     acct=std_acct(t, ["O1", "O2", "O4"]))
+
+
+def opex_days(cal):
+    s = pd.Series(pd.to_datetime(cal))
+    out = []
+    for (y, m), _ in s.groupby([s.dt.year, s.dt.month]):
+        first = pd.Timestamp(y, m, 1)
+        fri = first + pd.Timedelta(days=(4 - first.weekday()) % 7 + 14)
+        out.append((y, m, fri))
+    return out
+
+
+def rule_b39(book):
+    cal = pd.DatetimeIndex(pd.to_datetime(book.cal))
+    rows = []
+    for base in PAIRS:
+        g = book.tab[base]
+        gi = pd.DatetimeIndex(pd.to_datetime(g.d))
+        for y, m, fri in opex_days(book.cal):
+            e = np.searchsorted(gi, fri, side="right") - 1  # 만기일 (휴장이면 그 전 거래일)
+            if e < 1 or gi[e] < fri - pd.Timedelta(days=3):
+                continue
+            mon = fri - pd.Timedelta(days=4)
+            s_ = np.searchsorted(gi, mon, side="left") - 1  # 만기 주 시작 전 마지막 거래일
+            nxt = np.searchsorted(gi, fri + pd.Timedelta(days=7), side="right") - 1
+            for v, i, j in (("X1", s_, e), ("X2", e, nxt), ("X3", s_, e)):
+                if v == "X3" and m not in (3, 6, 9, 12):
+                    continue
+                if 0 <= i < j < len(g):
+                    rows += make_rows(book, base, [(i, j, {})], v)
+    t = pd.DataFrame(rows)
+    names = {"X1": "X1 기본: 만기 주 시작 전 종가 → 만기일(셋째 금요일) 종가", "X2": "X2 만기 다음 주 (약세 주장 확인용)",
+             "X3": "X3 분기 만기(3·6·9·12월)만"}
+    return t, report("b39 백테스트 결과: 옵션 만기 주간", "", t, names, acct=std_acct(t, ["X1", "X3"]))
+
+
+def rule_b40(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        gi = pd.DatetimeIndex(pd.to_datetime(z["g"].d))
+        wk = gi.isocalendar().year.to_numpy() * 100 + gi.isocalendar().week.to_numpy()
+        last = np.r_[wk[1:] != wk[:-1], True]  # 그 주 마지막 거래일
+        lastidx = np.nonzero(last)[0]
+        wr = np.full(len(gi), np.nan)
+        for a, b in zip(lastidx[:-1], lastidx[1:]):
+            wr[b] = z["cd"][b] / z["c"][a] - 1
+        n = len(gi)
+        for v, th, filt, hold in (("W1", -0.03, True, 5), ("W2", -0.05, True, 5), ("W3", -0.03, False, 5), ("W4", -0.03, True, 3)):
+            en = last & (wr < th) & (z["up200"] if filt else True)
+            rows += trades_from(book, base, en, lambda i, hold=hold: min(i + hold, n - 1), v)
+    t = pd.DataFrame(rows)
+    names = {"W1": "W1 기본: 그 주 -3% 넘게 하락 + 200일 위 → 그 주 마지막 날 종가 매수, 5거래일 뒤 매도", "W2": "W2 -5%",
+             "W3": "W3 200일 조건 없이", "W4": "W4 3거래일 뒤 매도"}
+    return t, report("b40 백테스트 결과: 나쁜 한 주 뒤 반등", "주간 수익 = 그 주 마지막 날 판단가 / 전주 마지막 날 종가 - 1.", t, names,
+                     acct=std_acct(t, names))
+
+
+RULE_TICKERS = {"b34": ["SPY"] + SECTORS, "b35": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"]}
+
+
+RULES = {"b26": rule_b26, "b27": rule_b27, "b28": rule_b28, "b29": rule_b29, "b30": rule_b30, "b29x": rule_b29x, "b31": rule_b31, "b32": rule_b32, "b33": rule_b33,
+         "b34": rule_b34, "b35": rule_b35, "b36": rule_b36, "b37": rule_b37, "b38": rule_b38, "b39": rule_b39, "b40": rule_b40}
 
 
 def main():
@@ -635,10 +984,16 @@ def main():
     ap.add_argument("--prep", default="prep_etf")
     ap.add_argument("--rule", required=True, choices=sorted(RULES))
     ap.add_argument("--out", default=None)
+    ap.add_argument("--prep2", default=None, help="b34·b35 섹터·채권·금 ETF 자료 폴더 (prep_etf2)")
     a = ap.parse_args()
     out = a.out or f"reports/{a.rule}"
     os.makedirs(out, exist_ok=True)
-    bars = load(a.prep, ["SPY", "QQQ", "IWM", "SPXL", "BGU", "TQQQ", "TNA"])
+    tickers = RULE_TICKERS.get(a.rule, ["SPY", "QQQ", "IWM", "SPXL", "BGU", "TQQQ", "TNA"])
+    bars = load(a.prep, [t for t in tickers if t not in INCEPTION2])
+    if a.prep2 and any(t in INCEPTION2 for t in tickers):
+        b2 = load(a.prep2, [t for t in tickers if t in INCEPTION2])
+        first = b2.ticker.map({k: dt.date.fromisoformat(v) for k, v in INCEPTION2.items()})
+        bars = pd.concat([bars, b2[b2.d >= first]], ignore_index=True)
     bars = bars[bars.mi >= 0]
     book = Book(bars)
     global BOOK
