@@ -57,7 +57,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rule: [b26, b27, b28, b29, b30]
+        rule: [b26, b27, b28, b29, b30, b29x]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

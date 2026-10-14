@@ -355,22 +355,24 @@ def rule_b28(book):
                 px = book.price_before(base, r.d, r.ann_mi)
                 if px is None:
                     continue
-                r1 = px / c[i] - 1
-                legs = {"1x": r1}
-                # 합성: 그 전 날들은 하루씩 3배, 발표일은 전날 종가 → 발표 직전 × 3
+                # 날마다 수익: 그 전 날들은 종가→종가, 발표일은 전날 종가 → 발표 직전
                 prev = c[i + 1:k] / c[i:k - 1] - 1 if k - 1 > i else np.array([])
                 part = px / c[k - 1] - 1
-                legs["syn3"] = float(np.prod(1 + 3 * prev) * (1 + 3 * part) - 1 - short.SYN_DAILY_COST * back)
+                paths = {"1x": np.r_[prev, part]}
+                # 합성: 하루씩 3배
+                paths["syn3"] = 3 * paths["1x"] - short.SYN_DAILY_COST
                 lev = PAIRS[base]
                 if lev in book.idx:
                     a, b = book.idx[lev].get(g.d[i]), book.idx[lev].get(r.d)
                     if a is not None and b is not None and b - a == back:
                         pl = book.price_before(lev, r.d, r.ann_mi)
                         if pl is not None:
-                            legs["real3"] = pl / book.tab[lev].c.iloc[a] - 1
-                for kind, gross in legs.items():
+                            cl = book.tab[lev].c.to_numpy()
+                            paths["real3"] = np.r_[cl[a + 1:b] / cl[a:b - 1] - 1, pl / cl[b - 1] - 1]
+                for kind, path in paths.items():
+                    gross = float(np.prod(1 + path) - 1)
                     rows.append(dict(variant=v, base=base, kind=kind, d=g.d[i], exit_d=r.d, days=back, gross=gross,
-                                     path=[gross], path_d=[r.d], ann=r.announce))
+                                     path=path, path_d=list(g.d[i + 1:k + 1]), ann=r.announce))
     t = pd.DataFrame(rows)
     names = {"F1": "F1 기본: 발표 전날 종가 매수 → 발표 1분 전 매도",
              "F2": "F2 발표 2일 전 종가 → 발표 1분 전",
@@ -477,7 +479,140 @@ def rule_b30(book):
     return t, lines
 
 
-RULES = {"b26": rule_b26, "b27": rule_b27, "b28": rule_b28, "b29": rule_b29, "b30": rule_b30}
+# ---------------------------------------------------------------- b29 다듬기 + 신호 합치기
+COST_LEVELS = (("표준 0.25%+0.1%", 0.0035), ("이벤트 0.07%+0.1%", 0.0017), ("이벤트 0.07%+0.02%", 0.0009))
+
+
+def inst(base, kind):
+    return {"1x": base, "syn3": f"{base}×3", "real3": PAIRS[base]}[kind]
+
+
+def pick(t, v, base, kind):
+    return t[(t.variant == v) & (t.base == base) & (t.kind == kind)].sort_values("d")
+
+
+def acct_table(book, combos, start=None):
+    """combos: [(이름, [거래표...], SPY 보유 여부)] -> 비용 단계별 연수익·최대낙폭 표."""
+    spy = book.tab["SPY"]
+    spy_r = dict(zip(spy.d, spy.c.pct_change().fillna(0.0)))
+    lines = ["| 조합 | 기간 | " + " | ".join(f"{n}: 연수익 / 최대낙폭 / 샤프" for n, _ in COST_LEVELS) + " | 3배 들고 있던 날 |",
+             "|---|---|" + "---|" * len(COST_LEVELS) + "---|"]
+    series = {}
+    for name, parts, idle in combos:
+        trades = [(inst(x.base, x.kind), list(x.path_d), np.asarray(x.path, float)) for s in parts for x in s.itertuples()]
+        if not trades:
+            continue
+        st = start or min(s.d.min() for s in parts if len(s))
+        days = [d for d in book.cal if d > st]
+        cells, inmkt = [], None
+        for cname, c in COST_LEVELS:
+            r = short.combine_daily(trades, days, c, spy_r if idle else None)
+            series[(name, cname)] = r
+            m = portfolio.stats(r)
+            cells.append(f"{pct(m['cagr'], 1)} / {pct(m['mdd'], 1)} / {m['sharpe']:.2f}")
+            if inmkt is None:
+                held = {d for _, ds, _ in trades for d in ds}
+                inmkt = np.mean([d in held for d in days])
+        lines.append(f"| {name} | {pd.Timestamp(days[0]).year}~ | " + " | ".join(cells) + f" | {inmkt:.0%} |")
+    firsts = sorted({next(d for d in book.cal if d > (start or min(s.d.min() for s in parts if len(s)))) for _, parts, _ in combos})
+    firsts = [f for k, f in enumerate(firsts) if k == 0 or pd.Timestamp(f).year != pd.Timestamp(firsts[k - 1]).year]
+    for f in firsts:
+        days = [d for d in book.cal if d >= f]
+        m = portfolio.stats(pd.Series([spy_r[d] for d in days]))
+        lines.append(f"| SPY 그냥 보유 | {pd.Timestamp(days[0]).year}~ | {pct(m['cagr'], 1)} / {pct(m['mdd'], 1)} / {m['sharpe']:.2f} | | | 0% |")
+    return lines, series
+
+
+def yearly_series(series, keys, book, start):
+    spy = book.tab["SPY"]
+    sp = pd.Series(spy.c.to_numpy(), index=pd.to_datetime(spy.d)).pct_change().fillna(0.0)
+    sp = sp[sp.index > pd.Timestamp(start)]
+    cols = {f"{n} ({c})": portfolio.yearly(series[(n, c)]) for n, c in keys}
+    cols["SPY"] = portfolio.yearly(sp)
+    lines = ["| 해 | " + " | ".join(cols) + " |", "|---" * (len(cols) + 1) + "|"]
+    for y in cols["SPY"].index:
+        lines.append(f"| {y} | " + " | ".join(pct(v.get(y, np.nan), 1) for v in cols.values()) + " |")
+    return lines
+
+
+def rule_b29x(book):
+    sma = lambda x, g: g.cd.to_numpy() > x.sma200.to_numpy()  # noqa: E731
+    r1 = lambda x, g: (x.rsi2.to_numpy() < 10) & sma(x, g)  # noqa: E731
+    r2 = lambda x, g: (x.rsi2.to_numpy() < 5) & sma(x, g)  # noqa: E731
+
+    def ex(stop=None, max_days=10):
+        def f(x, cd, i):
+            entry = cd[i]
+            if stop is None:
+                return short.exit_rsi(cd, x.sma5.to_numpy(), i, max_days)
+            return short.exit_rsi_stop(cd, x.sma5.to_numpy(), i, entry, stop, max_days)
+        return f
+    variants = {"R1": (r1, ex()), "R2": (r2, ex()), "R1S3": (r1, ex(0.03)), "R1S5": (r1, ex(0.05)),
+                "R2S3": (r2, ex(0.03)), "R1M5": (r1, ex(None, 5))}
+    rows = []
+    for base in ("SPY", "QQQ"):
+        for v, (en, e) in variants.items():
+            rows += signal_trades(book, base, en, e, v)
+    t = pd.DataFrame(rows)
+    names = {"R1": "R1 b29 기본 (RSI(2) < 10, 200일 위, 5일 평균 위 마감에 매도, 최대 10일)",
+             "R2": "R2 RSI(2) < 5",
+             "R1S3": "R1 + 손절: 기초 ETF 판단가가 매수가보다 3% 아래 (3배로 약 -9%)",
+             "R1S5": "R1 + 손절 5% (3배로 약 -15%)",
+             "R2S3": "R2 + 손절 3%",
+             "R1M5": "R1, 최대 5일"}
+    lines = ["# b29 다듬기 + 신호 합치기", "",
+             "1부: b29 RSI(2)에 손절·짧은 최대 보유를 붙이고 수수료 단계별로 계좌를 다시 계산. 손절은 15:55 판단가로 보고 15:59 종가에 판다 (장중 손절 아님). "
+             "2부: b29·b30 I4·b28 F2 신호를 한 계좌로 합침. 같은 날 여러 신호면 돈을 똑같이 나누고, 신호 없는 날은 현금 또는 SPY 보유. "
+             "비용은 종목별 비중이 바뀐 만큼 매김 (SPY → SPXL로 바꾸면 SPY 매도 + SPXL 매수 둘 다). " + COMMON_NOTE, ""]
+    g_lines, _ = gate_table(t, names, bases=("SPY", "QQQ"))
+    lines += g_lines
+    lines += ["## 1부 계좌: 수수료 단계별 (신호 때 계좌 100%, 신호 없으면 현금)", ""]
+    combos = []
+    for kind, kname in (("real3", "SPXL"), ("syn3", "SPY×3 합성")):
+        for v in variants:
+            combos.append((f"{v} {kname}", [pick(t, v, "SPY", kind)], False))
+    combos.append(("R1 TQQQ", [pick(t, "R1", "QQQ", "real3")], False))
+    combos.append(("R1S3 TQQQ", [pick(t, "R1S3", "QQQ", "real3")], False))
+    a_lines, _ = acct_table(book, combos)
+    lines += a_lines + ["", "합성 3배는 1994년부터라 실제 3배(2009년 무렵부터)와 기간이 달라요. SPY 줄은 각 기간의 SPY 보유.", ""]
+
+    # 2부: 합치기 (실제 3배, FOMC 목록이 2011년부터)
+    t28, _ = rule_b28(book)
+    t30, _ = rule_b30(book)
+    R1, R2 = pick(t, "R1", "SPY", "real3"), pick(t, "R2", "SPY", "real3")
+    R1S = pick(t, "R1S5", "SPY", "real3")
+    I4 = pick(t30, "I4", "SPY", "real3")
+    F2 = pick(t28, "F2", "QQQ", "real3")
+    F1 = pick(t28, "F1", "QQQ", "real3")
+    start = dt.date(2011, 1, 1)
+    clip = lambda s: s[s.d >= start]  # noqa: E731
+    R1, R2, R1S, I4, F2, F1 = map(clip, (R1, R2, R1S, I4, F2, F1))
+    combos = [("K1 R1만, 나머지 현금", [R1], False),
+              ("K2 R1만, 나머지 SPY", [R1], True),
+              ("K3 R1+I4+F2, 나머지 현금", [R1, I4, F2], False),
+              ("K4 R1+I4+F2, 나머지 SPY", [R1, I4, F2], True),
+              ("K5 R1+I4, 나머지 SPY", [R1, I4], True),
+              ("K6 R2+I4+F2, 나머지 SPY", [R2, I4, F2], True),
+              ("K7 R1S5+I4+F1, 나머지 SPY", [R1S, I4, F1], True),
+              ("K8 I4만, 나머지 SPY", [I4], True)]
+    lines += ["## 2부: 신호 합치기 (실제 3배 SPXL·TQQQ, 2011~2026-03)", "",
+              f"신호 수: R1 {len(R1)}, R2 {len(R2)}, R1S5 {len(R1S)}, I4 {len(I4)}, F2 TQQQ {len(F2)}, F1 TQQQ {len(F1)}.", ""]
+    k_lines, series = acct_table(book, combos, start=start)
+    lines += k_lines
+    lines += ["", "## 해마다 (2부)", "",
+              *yearly_series(series, [("K2 R1만, 나머지 SPY", COST_LEVELS[0][0]), ("K4 R1+I4+F2, 나머지 SPY", COST_LEVELS[0][0]),
+                                      ("K4 R1+I4+F2, 나머지 SPY", COST_LEVELS[1][0])], book, start)]
+    # 합성 3배로 긴 기간 (FOMC 빼고)
+    S1, SI = pick(t, "R1", "SPY", "syn3"), pick(t30, "I4", "SPY", "syn3")
+    lines += ["", "## 2부 긴 기간: 합성 3배 (FOMC 없이, 1994~)", ""]
+    l_lines, _ = acct_table(book, [("L1 R1 합성, 나머지 SPY", [S1], True), ("L2 R1+I4 합성, 나머지 SPY", [S1, SI], True),
+                                    ("L3 R1+I4 합성, 나머지 현금", [S1, SI], False)],
+                             start=max(S1.d.min(), SI.d.min()))
+    lines += l_lines
+    return pd.concat([t, t28[t28.variant.isin(["F1", "F2"])], t30[t30.variant == "I4"]], ignore_index=True), lines
+
+
+RULES = {"b26": rule_b26, "b27": rule_b27, "b28": rule_b28, "b29": rule_b29, "b30": rule_b30, "b29x": rule_b29x}
 
 
 def main():

@@ -60,3 +60,21 @@ def test_split_adjust():
     assert found == [("X", 3, 3)]
     assert np.allclose(a.c, [100 / 3, 34, 34.5, 35])
     assert np.allclose(a.f, [1 / 3, 1 / 3, 1, 1])
+
+
+def test_exit_rsi_stop():
+    cd = np.array([100, 98, 96, 94, 99, 101.0])
+    sma5 = np.array([np.nan, 99, 99, 99, 98, 99.0])
+    assert short.exit_rsi_stop(cd, sma5, 0, 100, 0.05) == 3  # 94 <= 95: 손절
+    assert short.exit_rsi_stop(cd, sma5, 0, 100, 0.10) == 4  # 99 > 98: 보통 청산
+
+
+def test_combine_daily():
+    days = ["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-04"]
+    tr = [("SPXL", ["2020-01-02", "2020-01-03"], [0.03, -0.03]), ("TQQQ", ["2020-01-03"], [0.06])]
+    idle = {d: 0.01 for d in days}
+    r = short.combine_daily(tr, days, 0.0, idle)
+    assert np.allclose(r.to_numpy(), [0.01, 0.03, 0.015, 0.01])
+    r = short.combine_daily(tr, days, 0.001, None)
+    # 2일: 0 -> SPXL 1 (회전 1), 3일: SPXL .5 TQQQ .5 (회전 1), 4일: 모두 팔기 (회전 1)
+    assert np.allclose(r.to_numpy(), [0.0, 0.03 - 0.001, 0.015 - 0.001, -0.001])

@@ -138,3 +138,43 @@ def exit_ibs(ibs, i, hi=0.7, max_days=5):
         if ibs[j] > hi:
             return j
     return min(i + max_days, n - 1)
+
+
+def exit_rsi_stop(cd, sma5, i, entry, stop, max_days=10):
+    """b29 청산 + 손절: 판단가 > 5일 평균이거나 판단가가 매수가보다 stop 넘게 떨어진 첫날 종가, 아니면 max_days일째 종가."""
+    n = len(cd)
+    for j in range(i + 1, min(i + max_days, n - 1) + 1):
+        if cd[j] > sma5[j] or cd[j] <= entry * (1 - stop):
+            return j
+    return min(i + max_days, n - 1)
+
+
+def combine_daily(trades, days, cost, idle=None):
+    """여러 신호 거래를 한 계좌로 합침.
+    trades: [(종목, 날짜 목록, 날마다 수익)] - 날짜 d에 그 거래를 들고 있으면 그날 수익이 path 값.
+    그날 들고 있는 거래가 여럿이면 돈을 똑같이 나눔. 아무 거래도 없는 날은 idle(날짜 -> SPY 수익) 보유, None이면 현금.
+    비용: 종목별 비중이 바뀐 만큼 × cost(한쪽). 비중은 전날 종가에 정해짐."""
+    days = list(days)
+    pos = {d: k for k, d in enumerate(days)}
+    active = [[] for _ in days]
+    for tk, ds, path in trades:
+        for d, r in zip(ds, path):
+            k = pos.get(d)
+            if k is not None:
+                active[k].append((tk, r))
+    ret = np.zeros(len(days))
+    prev_w = {}
+    for k, d in enumerate(days):
+        w, r = {}, 0.0
+        if active[k]:
+            share = 1.0 / len(active[k])
+            for tk, rr in active[k]:
+                w[tk] = w.get(tk, 0.0) + share
+                r += share * rr
+        elif idle is not None:
+            w["SPY"] = 1.0
+            r = idle.get(d, 0.0)
+        turn = sum(abs(w.get(t, 0.0) - prev_w.get(t, 0.0)) for t in set(w) | set(prev_w))
+        ret[k] = r - cost * turn
+        prev_w = w
+    return pd.Series(ret, index=pd.to_datetime(days))
