@@ -601,7 +601,9 @@ def rule_b29x(book):
     lines += k_lines
     lines += ["", "## 해마다 (2부)", "",
               *yearly_series(series, [("K2 R1만, 나머지 SPY", COST_LEVELS[0][0]), ("K4 R1+I4+F2, 나머지 SPY", COST_LEVELS[0][0]),
-                                      ("K4 R1+I4+F2, 나머지 SPY", COST_LEVELS[1][0])], book, start)]
+                                      ("K4 R1+I4+F2, 나머지 SPY", COST_LEVELS[1][0]), ("K3 R1+I4+F2, 나머지 현금", COST_LEVELS[0][0]),
+                                      ("K3 R1+I4+F2, 나머지 현금", COST_LEVELS[1][0]), ("K3 R1+I4+F2, 나머지 현금", COST_LEVELS[2][0])],
+                             book, start)]
     # 합성 3배로 긴 기간 (FOMC 빼고)
     S1, SI = pick(t, "R1", "SPY", "syn3"), pick(t30, "I4", "SPY", "syn3")
     lines += ["", "## 2부 긴 기간: 합성 3배 (FOMC 없이, 1994~)", ""]
@@ -609,6 +611,19 @@ def rule_b29x(book):
                                     ("L3 R1+I4 합성, 나머지 현금", [S1, SI], False)],
                              start=max(S1.d.min(), SI.d.min()))
     lines += l_lines
+    # 2020년(코로나 폭락·반등) 한 해에 기대는지 보려고 그해를 빼고 다시 잼
+    lines += ["", "## 2020년 빼고 (2부, 그해 수익을 0으로)", "", "| 조합 | 비용 | 연수익 | 최대낙폭 |", "|---|---|---|---|"]
+    for (n, c), r in series.items():
+        r2 = r.copy()
+        r2[r2.index.year == 2020] = 0.0
+        m = portfolio.stats(r2)
+        lines.append(f"| {n} | {c} | {pct(m['cagr'], 1)} | {pct(m['mdd'], 1)} |")
+    spy = book.tab["SPY"]
+    sp = pd.Series(spy.c.to_numpy(), index=pd.to_datetime(spy.d)).pct_change().fillna(0.0)
+    sp = sp[sp.index > pd.Timestamp(start)]
+    sp[sp.index.year == 2020] = 0.0
+    m = portfolio.stats(sp)
+    lines.append(f"| SPY 그냥 보유 | | {pct(m['cagr'], 1)} | {pct(m['mdd'], 1)} |")
     return pd.concat([t, t28[t28.variant.isin(["F1", "F2"])], t30[t30.variant == "I4"]], ignore_index=True), lines
 
 
