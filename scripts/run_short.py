@@ -487,7 +487,7 @@ COST_LEVELS = (("표준 0.25%+0.1%", 0.0035), ("이벤트 0.07%+0.1%", 0.0017), 
 
 
 def inst(base, kind):
-    return {"1x": base, "syn3": f"{base}×3", "real3": PAIRS.get(base, f"{base}×3")}[kind]
+    return {"1x": base, "syn2": f"{base}×2", "syn3": f"{base}×3", "real3": PAIRS.get(base, f"{base}×3")}[kind]
 
 
 def pick(t, v, base, kind):
@@ -1399,16 +1399,155 @@ def rule_b41x(book):
     return pd.concat([t44, t47], ignore_index=True), lines
 
 
+def b44_parts(book, base, other="TLT"):
+    """i일 기준 5일 수익 (오늘 판단가 / 5거래일 전 종가 - 1): 다른 자산 ro, 주식 ETF rs. 자료 없으면 nan."""
+    z, o = ind(book, base), ind(book, other)
+    od = dict(zip(o["g"].d, range(len(o["g"]))))
+    n = len(z["c"])
+    ro, rs = np.full(n, np.nan), np.full(n, np.nan)
+    for i in range(5, n):
+        k = od.get(z["g"].d.iloc[i])
+        if k is None or k < 5:
+            continue
+        ro[i] = o["cd"][k] / o["c"][k - 5] - 1
+        rs[i] = z["cd"][i] / z["c"][i - 5] - 1
+    return ro, rs
+
+
+def with_syn2(t):
+    """1배 거래에서 합성 2배(날마다 2배 - 0.013%) 줄을 만들어 붙임."""
+    x = t[t.kind == "1x"].copy()
+    x["kind"] = "syn2"
+    x["path"] = [2 * np.asarray(pth, float) - 0.00013 for pth in x.path]
+    x["gross"] = [float(np.prod(1 + pth) - 1) for pth in x.path]
+    return pd.concat([t, x], ignore_index=True)
+
+
+def acct_one(book, parts, start, cost, scale=1.0):
+    trades = [(inst(x.base, x.kind), list(x.path_d), np.asarray(x.path, float)) for s in parts for x in s.itertuples()]
+    days = [d for d in book.cal if d > start]
+    return short.combine_daily(trades, days, cost) * scale
+
+
+def bh_series(book, tk, start):
+    g = book.tab[tk]
+    r = pd.Series(g.c.to_numpy(float), index=pd.to_datetime(g.d)).pct_change().fillna(0.0)
+    return r[r.index > pd.Timestamp(start)]
+
+
+def rule_b44x(book):
+    """b44 B2 다듬기: 기준값·보유일 민감도, 채권 상승 조건, 손절, 배율·비중."""
+    rows = []
+    std, low = COST_LEVELS[0][1], COST_LEVELS[1][1]
+    for base in ("SPY", "QQQ"):
+        z = ind(book, base)
+        ro, rs = b44_parts(book, base)
+        n = len(z["c"])
+        gap = ro - rs
+        with np.errstate(invalid="ignore"):
+            for th in (0.02, 0.03, 0.04, 0.05):
+                for hold in (3, 5, 7, 10):
+                    rows += trades_from(book, base, gap > th, lambda i, h=hold: min(i + h, n - 1), f"G{int(th * 100)}-{hold}")
+            h5 = lambda i: min(i + 5, n - 1)  # noqa: E731
+            b2 = gap > 0.03
+            for v, en in (("F1", b2 & (ro > 0)), ("F2", b2 & (ro > 0.01)), ("F3", b2 & z["up200"]), ("F4", b2 & ~z["up200"]),
+                          ("C1", rs < -0.03), ("C2", (rs < -0.03) & (ro <= 0))):
+                rows += trades_from(book, base, en, h5, v)
+            for v, stop in (("S3", 0.03), ("S5", 0.05)):
+                c, cd = z["c"], z["cd"]
+                rows += trades_from(book, base, b2, lambda i, s_=stop: short.first_true(cd < c[i] * (1 - s_), i, 5), v)
+    t = with_syn2(pd.DataFrame(rows))
+    st, st2 = dt.date(2011, 1, 1), dt.date(2003, 1, 1)
+    lines = ["# b44 다듬기: 주식-채권 벌어짐 (B2)", "",
+             "B2 = 5일 수익 TLT − 주식 ETF > 3%p (오늘 판단가 기준) → 그날 종가 매수, 5거래일 뒤 종가 매도. 신호 없는 날 현금. "
+             "실제 3배는 2011~2026-03, 합성은 2003~ (TLT 자료가 2002-07부터). QQQ는 2004~2011 자료가 없어서 합성 QQQ 긴 기간은 그 구간이 빠져요 "
+             "→ 2008년은 SPY 합성으로만 볼 수 있어요. 합성 2배 = 1배 날마다 × 2 − 0.013%. " + COMMON_NOTE, ""]
+
+    def cell(s_, start, cost=std):
+        if not len(s_):
+            return "-"
+        m = portfolio.stats(acct_one(book, [s_[s_.d >= start]], start, cost))
+        return f"{pct(s_.gross.mean())} (t {tstat(s_.gross):.1f}, {len(s_)}번) · {pct(m['cagr'], 1)} / {pct(m['mdd'], 0)}"
+    for title, base, kind, start in (("TQQQ 실제 3배, 2011~", "QQQ", "real3", st), ("SPXL 실제 3배, 2011~", "SPY", "real3", st),
+                                     ("SPY×3 합성, 2003~ (2008 포함)", "SPY", "syn3", st2)):
+        lines += [f"## 민감도: {title}", "", "칸 = 거래당 비용 전 평균 (t값, 거래 수) · 표준 수수료 계좌 연수익 / 최대낙폭", "",
+                  "| TLT − 주식 | 3일 보유 | 5일 | 7일 | 10일 |", "|---|---|---|---|---|"]
+        for th in (2, 3, 4, 5):
+            lines.append(f"| > {th}%p | " + " | ".join(cell(pick(t, f"G{th}-{h}", base, kind), start) for h in (3, 5, 7, 10)) + " |")
+        lines.append("")
+    names = {"G3-5": "B2 그대로", "F1": "F1 + TLT 5일 수익 > 0 (채권이 실제로 오름)", "F2": "F2 + TLT 5일 수익 > 1%",
+             "F3": "F3 + 주식 ETF 200일 평균 위", "F4": "F4 + 200일 평균 아래 (참고)", "S3": "S3 + 손절: 기초 ETF가 매수가보다 3% 아래 마감",
+             "S5": "S5 + 손절 5%", "C1": "C1 대조: TLT 없이 주식 5일 -3% 넘게 하락만", "C2": "C2 대조: 주식 -3% + 채권도 안 오름"}
+    insts = (("TQQQ", "QQQ", "real3", st), ("SPXL", "SPY", "real3", st), ("SPY×3 합성 2003~", "SPY", "syn3", st2))
+    lines += ["## 조건·손절·대조 (기준 3%p, 5일 보유)", "",
+              "| 변형 | 종목 | 거래 수 | 비용 전 평균 | t값 | 승률 | 표준: 연수익 / 최대낙폭 | 0.07%+0.1%: 연수익 / 최대낙폭 | 2008 | 2022 |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
+    for v, nm in names.items():
+        for lab, base, kind, start in insts:
+            s_ = pick(t, v, base, kind)
+            s_ = s_[s_.d >= start]
+            if not len(s_):
+                continue
+            r1, r2 = acct_one(book, [s_], start, std), acct_one(book, [s_], start, low)
+            m1, m2 = portfolio.stats(r1), portfolio.stats(r2)
+            y = portfolio.yearly(r1)
+            lines.append(f"| {nm} | {lab} | {len(s_)} | {pct(s_.gross.mean())} | {tstat(s_.gross):.2f} | {(s_.gross > 0).mean():.0%} | "
+                         f"{pct(m1['cagr'], 1)} / {pct(m1['mdd'], 1)} | {pct(m2['cagr'], 1)} / {pct(m2['mdd'], 1)} | "
+                         f"{pct(y.get(2008, np.nan), 1)} | {pct(y.get(2022, np.nan), 1)} |")
+    lines += ["", "## 배율과 비중 (B2 그대로)", "",
+              "비중 50% = 신호 때 계좌 절반만 사고 나머지는 현금 (날마다 수익 × 0.5로 계산).", "",
+              "| 무엇으로 | 기간 | 표준: 연수익 / 최대낙폭 / 샤프 | 0.07%+0.1%: 연수익 / 최대낙폭 / 샤프 | 2008 | 2022 |", "|---|---|---|---|---|---|"]
+    lev_rows = [("QQQ 1배", "QQQ", "1x", 1.0, st), ("QQQ 합성 2배", "QQQ", "syn2", 1.0, st), ("TQQQ", "QQQ", "real3", 1.0, st),
+                ("TQQQ 비중 50%", "QQQ", "real3", 0.5, st), ("TQQQ 비중 33%", "QQQ", "real3", 1 / 3, st),
+                ("SPY 1배", "SPY", "1x", 1.0, st2), ("SPY 합성 2배", "SPY", "syn2", 1.0, st2), ("SPY 합성 3배", "SPY", "syn3", 1.0, st2),
+                ("SPY 합성 3배 비중 50%", "SPY", "syn3", 0.5, st2), ("SPXL", "SPY", "real3", 1.0, st), ("SPXL 비중 50%", "SPY", "real3", 0.5, st)]
+    series = {}
+    for nm, base, kind, sc, start in lev_rows:
+        s_ = pick(t, "G3-5", base, kind)
+        s_ = s_[s_.d >= start]
+        if not len(s_):
+            continue
+        cells = []
+        for cname, c in COST_LEVELS[:2]:
+            r = acct_one(book, [s_], start, c, sc)
+            series[(nm, cname)] = r
+            m = portfolio.stats(r)
+            cells.append(f"{pct(m['cagr'], 1)} / {pct(m['mdd'], 1)} / {m['sharpe']:.2f}")
+        y = portfolio.yearly(series[(nm, COST_LEVELS[0][0])])
+        lines.append(f"| {nm} | {pd.Timestamp(start).year + 0}~ | " + " | ".join(cells) +
+                     f" | {pct(y.get(2008, np.nan), 1)} | {pct(y.get(2022, np.nan), 1)} |")
+    for tk, start in (("SPY", st), ("QQQ", st), ("SPY", st2)):
+        r = bh_series(book, tk, start)
+        m = portfolio.stats(r)
+        y = portfolio.yearly(r)
+        lines.append(f"| {tk} 그냥 보유 | {start.year}~ | {pct(m['cagr'], 1)} / {pct(m['mdd'], 1)} / {m['sharpe']:.2f} | | "
+                     f"{pct(y.get(2008, np.nan), 1)} | {pct(y.get(2022, np.nan), 1)} |")
+    # 해마다
+    keys = [("TQQQ", COST_LEVELS[0][0]), ("TQQQ 비중 50%", COST_LEVELS[0][0]), ("QQQ 합성 2배", COST_LEVELS[0][0]),
+            ("SPY 합성 3배", COST_LEVELS[0][0]), ("SPY 합성 3배 비중 50%", COST_LEVELS[0][0])]
+    keys = [k for k in keys if k in series]
+    cols = {f"{n} (표준)": portfolio.yearly(series[(n, c)]) for n, c in keys}
+    f1 = pick(t, "F1", "QQQ", "real3")
+    if len(f1):
+        cols["F1 TQQQ (표준)"] = portfolio.yearly(acct_one(book, [f1[f1.d >= st]], st, std))
+    cols["SPY"] = portfolio.yearly(bh_series(book, "SPY", st2))
+    lines += ["", "## 해마다 (표준 수수료)", "", "| 해 | " + " | ".join(cols) + " |", "|---" * (len(cols) + 1) + "|"]
+    for yv in cols["SPY"].index:
+        lines.append(f"| {yv} | " + " | ".join(pct(v.get(yv, np.nan), 1) for v in cols.values()) + " |")
+    return t, lines
+
+
 RULE_TICKERS = {"b34": ["SPY"] + SECTORS, "b35": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"],
                 "b31x": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"], "b44": ["SPY", "QQQ", "IWM", "TLT", "GLD", "SPXL", "BGU", "TQQQ", "TNA"],
                 "b45": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"],
-                "b41x": ["SPY", "QQQ", "IWM", "TLT", "GLD", "SPXL", "BGU", "TQQQ", "TNA"]}
+                "b41x": ["SPY", "QQQ", "IWM", "TLT", "GLD", "SPXL", "BGU", "TQQQ", "TNA"],
+                "b44x": ["SPY", "QQQ", "IWM", "TLT", "SPXL", "BGU", "TQQQ", "TNA"]}
 
 
 RULES = {"b26": rule_b26, "b27": rule_b27, "b28": rule_b28, "b29": rule_b29, "b30": rule_b30, "b29x": rule_b29x, "b31": rule_b31, "b32": rule_b32, "b33": rule_b33,
          "b34": rule_b34, "b35": rule_b35, "b36": rule_b36, "b37": rule_b37, "b38": rule_b38, "b39": rule_b39, "b40": rule_b40,
          "b31x": rule_b31x, "b41": rule_b41, "b42": rule_b42, "b43": rule_b43, "b44": rule_b44, "b45": rule_b45,
-         "b46": rule_b46, "b47": rule_b47, "b48": rule_b48, "b49": rule_b49, "b50": rule_b50, "b41x": rule_b41x}
+         "b46": rule_b46, "b47": rule_b47, "b48": rule_b48, "b49": rule_b49, "b50": rule_b50, "b41x": rule_b41x, "b44x": rule_b44x}
 
 
 def main():
