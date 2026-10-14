@@ -1,0 +1,111 @@
+"""규칙서 b26~b30(1~3일 짧은 보유) 계산: 하루 자료 만들기, 지표, 거래 수익.
+
+판단은 15:55 1분봉 종가(반나절 장은 12:55)를 그날 종가 대신 쓰고, 매수·매도는 15:59 1분봉 종가(반나절 12:59)로 한다.
+그래서 지표가 그날 종가를 미리 보지 않는다.
+합성 3배: 기초 ETF 종가→종가 수익률 × 3을 날마다 곱해 쌓고, 3배 ETF 운용·차입 비용 대신 보유 하루 0.02%를 뺀다.
+"""
+import numpy as np
+import pandas as pd
+
+CLOSE, HALF_CLOSE = 389, 209
+DECIDE, HALF_DECIDE = 385, 205
+SYN_DAILY_COST = 0.0002
+
+
+def daily_table(bars, half):
+    """bars: 정규장 1분봉 DataFrame(ticker, d, mi, o, h, l, c, v). half: 반나절 장 날짜 집합.
+    -> 종목별 하루 표 (ticker, d, o, h, l, c, cd, hd, ld): c = 마감 종가, cd/hd/ld = 판단 시각까지의 종가·고가·저가."""
+    b = bars[bars.mi >= 0]
+    is_half = b.d.isin(half)
+    close_mi = np.where(is_half, HALF_CLOSE, CLOSE)
+    decide_mi = np.where(is_half, HALF_DECIDE, DECIDE)
+    upto_c = b[b.mi <= close_mi]
+    upto_d = b[b.mi <= decide_mi]
+    g = upto_c.groupby(["ticker", "d"], sort=False)
+    out = g.agg(o=("o", "first"), h=("h", "max"), l=("l", "min"), c=("c", "last"), last_mi=("mi", "max")).reset_index()
+    gd = upto_d.groupby(["ticker", "d"], sort=False).agg(cd=("c", "last"), hd=("h", "max"), ld=("l", "min")).reset_index()
+    out = out.merge(gd, on=["ticker", "d"], how="left")
+    out["half"] = out.d.isin(half)
+    # 마감 직전 자료가 없는 날(15:50 전에 끝난 자료)은 마감가를 믿을 수 없어서 뺀다
+    need = np.where(out.half, HALF_CLOSE - 10, CLOSE - 10)
+    out = out[out.last_mi >= need]
+    return out.sort_values(["ticker", "d"]).reset_index(drop=True)
+
+
+def rsi_wilder(close, n=2):
+    """윌더 방식 RSI. close: 1차원 배열."""
+    c = np.asarray(close, float)
+    out = np.full(len(c), np.nan)
+    if len(c) <= n:
+        return out
+    d = np.diff(c)
+    up, dn = np.clip(d, 0, None), np.clip(-d, 0, None)
+    au, ad = up[:n].mean(), dn[:n].mean()
+    for i in range(n, len(c)):
+        if i > n:
+            au = (au * (n - 1) + up[i - 1]) / n
+            ad = (ad * (n - 1) + dn[i - 1]) / n
+        out[i] = 100.0 if ad == 0 else 100 - 100 / (1 + au / ad)
+    return out
+
+
+def decision_series(g, n=2):
+    """한 종목 하루 표 -> 그날 판단용 지표 (종가 자리에 판단 시각 가격 cd를 넣어 계산).
+    rsi2(윌더), sma200·sma5(전날까지 종가 + 오늘 판단가), ibs(판단 시각까지 고가·저가 기준)."""
+    c = g.c.to_numpy(float)
+    cd = g.cd.to_numpy(float)
+    m = len(c)
+    up = np.clip(np.diff(c), 0, None)
+    dn = np.clip(-np.diff(c), 0, None)
+    AU, AD = np.full(m, np.nan), np.full(m, np.nan)  # k일 종가까지의 윌더 평균
+    if m > n:
+        AU[n], AD[n] = up[:n].mean(), dn[:n].mean()
+        for k in range(n + 1, m):
+            AU[k] = (AU[k - 1] * (n - 1) + up[k - 1]) / n
+            AD[k] = (AD[k - 1] * (n - 1) + dn[k - 1]) / n
+    rsi = np.full(m, np.nan)
+    x = np.r_[np.nan, cd[1:] - c[:-1]]
+    au = (np.r_[np.nan, AU[:-1]] * (n - 1) + np.clip(x, 0, None)) / n
+    ad = (np.r_[np.nan, AD[:-1]] * (n - 1) + np.clip(-x, 0, None)) / n
+    ok = ~np.isnan(au)
+    rsi[ok] = np.where(ad[ok] == 0, 100.0, 100 - 100 / (1 + au[ok] / np.where(ad[ok] == 0, 1, ad[ok])))
+    cs = np.r_[0.0, np.cumsum(c)]
+
+    def sma(k):
+        out = np.full(m, np.nan)
+        i = np.arange(k - 1, m)
+        out[i] = (cs[i] - cs[i - k + 1] + cd[i]) / k
+        return out
+
+    hd, ld = g.hd.to_numpy(float), g.ld.to_numpy(float)
+    rng = hd - ld
+    ibs = np.where(rng > 0, (cd - ld) / np.where(rng > 0, rng, 1), np.nan)
+    return pd.DataFrame({"rsi2": rsi, "sma200": sma(200), "sma5": sma(5), "ibs": ibs}, index=g.index)
+
+
+def hold_return(closes, i, j):
+    """같은 종목 종가 배열에서 i일 종가 매수 -> j일 종가 매도."""
+    return closes[j] / closes[i] - 1
+
+
+def synthetic_return(closes, i, j, lev=3):
+    """기초 ETF 종가로 만든 합성 lev배: i일 종가 매수 -> j일 종가 매도 (하루씩 lev배, 보유 하루 비용 차감)."""
+    r = closes[i + 1:j + 1] / closes[i:j] - 1
+    return float(np.prod(1 + lev * r) - 1 - SYN_DAILY_COST * (j - i))
+
+
+def exit_rsi(cd, sma5, i, max_days=10):
+    """b29 청산: 매수(i일) 뒤 판단가 > 5일 평균인 첫날 종가, 아니면 max_days일째 종가."""
+    n = len(cd)
+    for j in range(i + 1, min(i + max_days, n - 1) + 1):
+        if cd[j] > sma5[j]:
+            return j
+    return min(i + max_days, n - 1)
+
+
+def exit_ibs(ibs, i, hi=0.7, max_days=5):
+    n = len(ibs)
+    for j in range(i + 1, min(i + max_days, n - 1) + 1):
+        if ibs[j] > hi:
+            return j
+    return min(i + max_days, n - 1)
