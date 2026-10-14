@@ -706,6 +706,8 @@ def custom_rows(book, base, i, j, variant, start="close", end="close"):
 
 def report(title, note, t, names, bases=("SPY", "QQQ", "IWM"), acct=None, pooled=False):
     lines = [f"# {title}", "", note + " " + COMMON_NOTE, ""]
+    if t.empty:
+        return lines + ["**신호가 한 번도 없음**"]
     g_lines, _ = gate_table(t, names, bases)
     lines += g_lines
     if pooled:
@@ -733,6 +735,8 @@ def report(title, note, t, names, bases=("SPY", "QQQ", "IWM"), acct=None, pooled
 
 def std_acct(t, variants, bases=("SPY", "QQQ")):
     out = []
+    if t.empty:
+        return out
     for v in variants:
         for b in bases:
             for kind in ("real3", "syn3"):
@@ -1042,13 +1046,289 @@ def rule_b31x(book):
     return pd.concat([t29, t31, t32], ignore_index=True), lines
 
 
+# ---------------------------------------------------------------- b41~b50 추세·다른 신호
+def prior_max(c, n):
+    """i일 기준 지난 n일(i-n ~ i-1) 최고 종가."""
+    return pd.Series(c).shift(1).rolling(n).max().to_numpy()
+
+
+def prior_min(c, n):
+    return pd.Series(c).shift(1).rolling(n).min().to_numpy()
+
+
+def atr(g, n=20):
+    h, l, c = (g[k].to_numpy(float) for k in ("h", "l", "c"))
+    pc = np.r_[np.nan, c[:-1]]
+    tr = np.nanmax(np.c_[h - l, np.abs(h - pc), np.abs(l - pc)], axis=1)
+    return pd.Series(tr).shift(1).rolling(n).mean().to_numpy()  # 어제까지
+
+
+def donchian_rows(book, base, n_in, n_out, variant, filt=None, atr_stop=None, max_days=60):
+    z = ind(book, base)
+    hi, lo = prior_max(z["c"], n_in), prior_min(z["c"], n_out)
+    en = z["cd"] > hi
+    if filt is not None:
+        en = en & filt
+    a = atr(z["g"]) if atr_stop else None
+    lo_d = z["cd"] < prior_min(z["c"], n_out)
+
+    def ex(i):
+        if atr_stop:
+            stop = z["c"][i] - atr_stop * a[i]
+            return short.first_true(z["cd"] < stop, i, max_days)
+        return short.first_true(lo_d, i, max_days)
+    return trades_from(book, base, en, ex, variant)
+
+
+def rule_b41(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        rows += donchian_rows(book, base, 20, 10, "T1")
+        rows += donchian_rows(book, base, 55, 20, "T2")
+        rows += donchian_rows(book, base, 20, 10, "T3", filt=z["up200"])
+        rows += donchian_rows(book, base, 20, 10, "T4", atr_stop=2.0)
+    t = pd.DataFrame(rows)
+    names = {"T1": "T1 기본: 20일 최고 종가 돌파 → 10일 최저 종가 아래 마감 (최대 60일)", "T2": "T2 55일/20일",
+             "T3": "T3 + 200일 위", "T4": "T4 20일 돌파 → 매수가 - 2×ATR(20) 아래 마감 (최대 60일)"}
+    return t, report("b41 백테스트 결과: 돈치안 돌파", "최고·최저 = 오늘 빼고 지난 n일 종가, 오늘은 판단가로 비교.", t, names,
+                     acct=std_acct(t, names))
+
+
+def rule_b42(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        hi = prior_max(z["c"], 250)
+        new = z["cd"] > hi
+        first = new & ~np.r_[False, (z["c"] > hi)[:-1]]  # 어제는 신고가가 아니었음
+        n = len(z["c"])
+        lo20 = z["cd"] < prior_min(z["c"], 20)
+        for v, ex in (("H1", lambda i: min(i + 20, n - 1)), ("H2", lambda i: min(i + 10, n - 1)),
+                      ("H3", lambda i: min(i + 40, n - 1)), ("H4", lambda i: short.first_true(lo20, i, 60))):
+            rows += trades_from(book, base, first, ex, v)
+    t = pd.DataFrame(rows)
+    names = {"H1": "H1 기본: 52주(250일) 최고 종가 첫 돌파 → 20거래일 뒤", "H2": "H2 10일 뒤", "H3": "H3 40일 뒤",
+             "H4": "H4 20일 최저 종가 아래 마감에 매도 (최대 60일)"}
+    return t, report("b42 백테스트 결과: 52주 신고가", "", t, names, acct=std_acct(t, names))
+
+
+def breakout_rows(book, base, i, level, stop_lvl, hold, variant):
+    """i+1일 장중 1분봉 종가가 level을 처음 넘는 순간 매수(15:55 전) → hold일 뒤 종가, 그 전 stop_lvl 아래 마감이면 그날 종가."""
+    g = book.tab[base]
+    k = i + 1
+    if k >= len(g) or not book.continuous(base, i, min(k + hold, len(g) - 1)):
+        return []
+    d = g.d.iloc[k]
+    x = book.by_day.get((base, d))
+    if x is None:
+        return []
+    f = g.f.iloc[k]
+    mi, c = x[0], x[1] * f
+    lim = HALF_DECIDE_MI if d in book.half else DECIDE_MI
+    hit = np.nonzero((c > level) & (mi < lim))[0]
+    if not len(hit):
+        return []
+    m, px = int(mi[hit[0]]), float(c[hit[0]])
+    cc = g.c.to_numpy(float)
+    j = k
+    for jj in range(k, min(k + hold, len(g) - 1) + 1):
+        j = jj
+        if cc[jj] < stop_lvl and jj > k:
+            break
+    out = {"1x": np.r_[cc[k] / px - 1, cc[k + 1:j + 1] / cc[k:j] - 1]}
+    out["syn3"] = 3 * out["1x"] - short.SYN_DAILY_COST
+    lev = PAIRS.get(base)
+    if lev in book.idx:
+        a, b = book.idx[lev].get(d), book.idx[lev].get(g.d.iloc[j])
+        lp = book.price_before(lev, d, m + 1)
+        if a is not None and b is not None and b - a == j - k and lp:
+            lc = book.tab[lev].c.to_numpy(float)
+            out["real3"] = np.r_[lc[a] / lp - 1, lc[a + 1:b + 1] / lc[a:b] - 1]
+    ds = list(g.d[k:j + 1])
+    return [dict(variant=variant, base=base, kind=kd, d=d, exit_d=g.d.iloc[j], days=max(j - k, 1), gross=float(np.prod(1 + pth) - 1),
+                 path=pth, path_d=ds) for kd, pth in out.items()]
+
+
+DECIDE_MI, HALF_DECIDE_MI = 385, 205
+
+
+def rule_b43(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        g = z["g"]
+        h, l = g.h.to_numpy(float), g.l.to_numpy(float)
+        rng = h - l
+        for v, n, hold, filt in (("N1", 7, 5, False), ("N2", 4, 5, False), ("N3", 7, 10, False), ("N4", 7, 5, True)):
+            narrow = rng <= pd.Series(rng).rolling(n).min().to_numpy()
+            busy = -1
+            for i in np.nonzero(narrow)[0]:
+                if i <= busy or (filt and not (z["c"][i] > z["sma200"][i])):
+                    continue
+                r = breakout_rows(book, base, i, h[i], l[i], hold, v)
+                if r:
+                    rows += r
+                    busy = book.idx[base][r[0]["exit_d"]] - 1
+    t = pd.DataFrame(rows)
+    names = {"N1": "N1 기본: 어제 NR7 → 오늘 어제 고가 돌파 순간 매수 → 5일 뒤 (어제 저가 아래 마감이면 그날)", "N2": "N2 NR4",
+             "N3": "N3 10일 보유", "N4": "N4 200일 위만"}
+    return t, report("b43 백테스트 결과: 좁은 날 다음 날 돌파", "돌파는 1분봉 종가 기준, 3배 ETF는 같은 분의 가격으로 매수.", t, names,
+                     acct=std_acct(t, names))
+
+
+def rel_rows(book, other, th, hold, variant, base="SPY"):
+    z, o = ind(book, base), ind(book, other)
+    od = dict(zip(o["g"].d, range(len(o["g"]))))
+    oc = o["c"]
+    n = len(z["c"])
+    sig = np.zeros(n, bool)
+    for i in range(5, n):
+        d = z["g"].d.iloc[i]
+        k = od.get(d)
+        if k is None or k < 5:
+            continue
+        ro = o["cd"][k] / oc[k - 5] - 1
+        rs = z["cd"][i] / z["c"][i - 5] - 1
+        sig[i] = ro - rs > th
+    return trades_from(book, base, sig, lambda i: min(i + hold, n - 1), variant)
+
+
+def rule_b44(book):
+    rows = []
+    for base in PAIRS:
+        rows += rel_rows(book, "TLT", 0.05, 5, "B1", base)
+        rows += rel_rows(book, "TLT", 0.03, 5, "B2", base)
+        rows += rel_rows(book, "TLT", 0.05, 10, "B3", base)
+        rows += rel_rows(book, "GLD", 0.05, 5, "B4", base)
+    t = pd.DataFrame(rows)
+    names = {"B1": "B1 기본: 5일 수익 TLT − 주식 ETF > 5%p → 5일 보유", "B2": "B2 > 3%p", "B3": "B3 10일 보유", "B4": "B4 GLD − 주식 > 5%p"}
+    return t, report("b44 백테스트 결과: 주식-채권 벌어짐", "TLT 2002~, GLD 2004~. 5일 수익 = 오늘 판단가 / 5거래일 전 종가 - 1.", t, names,
+                     acct=std_acct(t, names))
+
+
+def rule_b45(book):
+    rows = []
+    for base in ASSETS:
+        if base not in book.tab or len(book.tab[base]) < 300:
+            continue
+        rows += donchian_rows(book, base, 20, 10, "M1")
+        rows += donchian_rows(book, base, 55, 20, "M2")
+    t = pd.DataFrame(rows)
+    t = pd.concat([t, t[(t.variant == "M1") & t.base.isin(["SPY", "QQQ", "IWM", "EFA"])].assign(variant="M3"),
+                   t[(t.variant == "M1") & t.base.isin(["TLT", "GLD"])].assign(variant="M4")], ignore_index=True)
+    names = {"M1": "M1 기본: 7개 자산 각각 20일 돌파 → 10일 최저 아래", "M2": "M2 55/20", "M3": "M3 주식 4개", "M4": "M4 TLT·GLD만"}
+    acct = [(f"{v} 1배", [t[(t.variant == v) & (t.kind == "1x")]], False) for v in names] + \
+           [(f"{v} 합성 3배", [t[(t.variant == v) & (t.kind == "syn3")]], False) for v in names]
+    return t, report("b45 백테스트 결과: 여러 자산 돈치안", "", t, names, bases=ASSETS, acct=acct, pooled=True)
+
+
+def rule_b46(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        g = z["g"]
+        hd, ld = g.hd.to_numpy(float), g.ld.to_numpy(float)
+        ibs = np.where(hd > ld, (z["cd"] - ld) / np.where(hd > ld, hd - ld, 1), np.nan)
+        gap = z["o"] / z["prev_c"] - 1
+        n = len(z["c"])
+        for v, th, hold, filt in (("U1", 0.005, 3, False), ("U2", 0.01, 3, False), ("U3", 0.005, 1, False), ("U4", 0.005, 3, True)):
+            en = (gap > th) & (ibs > 0.8) & (z["up200"] if filt else True)
+            rows += trades_from(book, base, en, lambda i, hold=hold: min(i + hold, n - 1), v)
+    t = pd.DataFrame(rows)
+    names = {"U1": "U1 기본: 갭 +0.5% 넘게 + IBS > 0.8 → 3일 뒤", "U2": "U2 갭 +1%", "U3": "U3 1일 뒤", "U4": "U4 + 200일 위"}
+    return t, report("b46 백테스트 결과: 갭 상승 강한 마감", "", t, names, acct=std_acct(t, names))
+
+
+def rule_b47(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        gi = pd.DatetimeIndex(pd.to_datetime(z["g"].d))
+        wk = gi.isocalendar().year.to_numpy() * 100 + gi.isocalendar().week.to_numpy()
+        first = np.r_[True, wk[1:] != wk[:-1]]
+        day = z["cd"] / z["prev_c"] - 1
+        n = len(gi)
+        for v, th, hold, filt in (("Y1", -0.005, 1, False), ("Y2", -0.01, 1, False), ("Y3", -0.005, 2, False), ("Y4", -0.005, 1, True)):
+            en = first & (day < th) & (z["up200"] if filt else True)
+            rows += trades_from(book, base, en, lambda i, hold=hold: min(i + hold, n - 1), v)
+    t = pd.DataFrame(rows)
+    names = {"Y1": "Y1 기본: 주 첫 거래일 -0.5% 넘게 하락 → 다음 날 종가", "Y2": "Y2 -1%", "Y3": "Y3 이틀 뒤", "Y4": "Y4 + 200일 위"}
+    return t, report("b47 백테스트 결과: 반등 화요일", "", t, names, acct=std_acct(t, names))
+
+
+def rule_b48(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        c, cd = z["c"], z["cd"]
+        for v, k, filt in (("A1", 20, True), ("A2", 10, True), ("A3", 50, True), ("A4", 20, False)):
+            m = pd.Series(c).rolling(k).mean().to_numpy()
+            md = (pd.Series(c).shift(1).rolling(k - 1).sum().to_numpy() + cd) / k  # 오늘 판단가 포함
+            cross = (cd > md) & np.r_[False, (c <= m)[:-1]]
+            below = cd < md
+            en = cross & (z["up200"] if filt else True)
+            rows += trades_from(book, base, en, lambda i, below=below: short.first_true(below, i, 60), v)
+    t = pd.DataFrame(rows)
+    names = {"A1": "A1 기본: 20일 평균 위로 넘음 + 200일 위 → 20일 평균 아래 마감 (최대 60일)", "A2": "A2 10일선", "A3": "A3 50일선",
+             "A4": "A4 200일 조건 없이"}
+    return t, report("b48 백테스트 결과: 20일선 타기", "", t, names, acct=std_acct(t, names))
+
+
+def rule_b49(book):
+    rows = []
+    for base in PAIRS:
+        z = ind(book, base)
+        c, cd = z["c"], z["cd"]
+        r = np.r_[np.nan, cd[1:] / c[:-1] - 1]  # 오늘은 판단가 수익
+        rc = pd.Series(np.r_[np.nan, c[1:] / c[:-1] - 1])
+        vol = np.sqrt(((rc.shift(1) ** 2).rolling(19).sum().to_numpy() + r ** 2) / 20 * 252)
+        for v, ma, vt, mx in (("V1", 50, 0.15, 60), ("V2", 50, 0.20, 60), ("V3", 100, 0.15, 60), ("V4", 50, 0.15, 20)):
+            m = (pd.Series(c).shift(1).rolling(ma - 1).sum().to_numpy() + cd) / ma
+            ok = (cd > m) & (vol < vt)
+            en = ok & ~np.r_[False, ok[:-1]]
+            rows += trades_from(book, base, en, lambda i, ok=ok, mx=mx: short.first_true(~ok, i, mx), v)
+    t = pd.DataFrame(rows)
+    names = {"V1": "V1 기본: 50일 평균 위 + 20일 변동성 < 연 15% 된 날 → 둘 중 하나 깨지면 (최대 60일)", "V2": "V2 변동성 < 20%",
+             "V3": "V3 100일 평균", "V4": "V4 최대 20일"}
+    return t, report("b49 백테스트 결과: 잔잔한 상승장만 3배", "변동성 = 지난 19일 종가 수익 + 오늘 판단가 수익의 제곱 평균 × 252의 제곱근.",
+                     t, names, acct=std_acct(t, names))
+
+
+def rule_b50(book):
+    f = fomc_table()
+    rows = []
+    for base in PAIRS:
+        g = book.tab[base]
+        cd = g.cd.to_numpy(float)
+        n = len(g)
+        for r in f.itertuples():
+            k = book.idx[base].get(r.d)
+            if k is None:
+                continue
+            px = book.price_before(base, r.d, r.ann_mi)
+            if px is None:
+                continue
+            react = cd[k] / px - 1
+            for v, ok, hold in (("P1", react > 0.005, 5), ("P2", react < -0.005, 5), ("P3", True, 5), ("P4", react > 0.005, 2)):
+                if ok and k + hold < n:
+                    rows += make_rows(book, base, [(k, k + hold, {"react": react})], v)
+    t = pd.DataFrame(rows)
+    names = {"P1": "P1 기본: 발표 직전 → 15:55 +0.5% 넘게 오름 → 그날 종가 매수, 5일 뒤", "P2": "P2 -0.5% 넘게 내림",
+             "P3": "P3 반응 상관없이", "P4": "P4 +0.5%, 2일 뒤"}
+    return t, report("b50 백테스트 결과: FOMC 발표 반응 따라가기", f"FOMC 정례 회의 {len(f)}번 (2011~2026-03).", t, names,
+                     acct=std_acct(t, names))
+
+
 RULE_TICKERS = {"b34": ["SPY"] + SECTORS, "b35": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"],
-                "b31x": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"]}
+                "b31x": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"], "b44": ["SPY", "QQQ", "IWM", "TLT", "GLD", "SPXL", "BGU", "TQQQ", "TNA"],
+                "b45": ASSETS + ["SPXL", "BGU", "TQQQ", "TNA"]}
 
 
 RULES = {"b26": rule_b26, "b27": rule_b27, "b28": rule_b28, "b29": rule_b29, "b30": rule_b30, "b29x": rule_b29x, "b31": rule_b31, "b32": rule_b32, "b33": rule_b33,
          "b34": rule_b34, "b35": rule_b35, "b36": rule_b36, "b37": rule_b37, "b38": rule_b38, "b39": rule_b39, "b40": rule_b40,
-         "b31x": rule_b31x}
+         "b31x": rule_b31x, "b41": rule_b41, "b42": rule_b42, "b43": rule_b43, "b44": rule_b44, "b45": rule_b45,
+         "b46": rule_b46, "b47": rule_b47, "b48": rule_b48, "b49": rule_b49, "b50": rule_b50}
 
 
 def main():
@@ -1073,7 +1353,7 @@ def main():
     print("tickers:", {tk: (str(g.d.iloc[0]), str(g.d.iloc[-1]), len(g)) for tk, g in book.tab.items()}, flush=True)
     print("splits:", [(tk, str(d), k) for tk, d, k in book.splits], flush=True)
     t, lines = RULES[a.rule](book)
-    t.drop(columns=["path", "path_d"]).to_csv(os.path.join(out, "trades.csv.gz"), index=False)
+    t.drop(columns=["path", "path_d"], errors="ignore").to_csv(os.path.join(out, "trades.csv.gz"), index=False)
     text = "\n".join(lines) + "\n"
     open(os.path.join(out, "report.md"), "w").write(text)
     print(text)
