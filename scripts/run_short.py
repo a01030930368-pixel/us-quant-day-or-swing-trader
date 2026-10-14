@@ -43,11 +43,11 @@ class Book:
         # 종목 줄 번호 -> SPY 거래일 번호 (QQQ는 2004~2011년 이름이 QQQQ라 자료가 비어 있음: 빈 곳을 건너는 거래는 버림)
         spy_pos = {d: i for i, d in enumerate(self.cal)}
         self.pos = {tk: np.array([spy_pos.get(d, -10 ** 6) for d in g.d]) for tk, g in self.tab.items()}
+        self.by_day = {k: (g.mi.to_numpy(), g.c.to_numpy()) for k, g in bars.groupby(["ticker", "d"], sort=False)}
 
     def continuous(self, tk, i, j):
         p = self.pos[tk]
         return p[i] >= 0 and p[j] - p[i] == j - i
-        self.by_day = {k: (g.mi.to_numpy(), g.c.to_numpy()) for k, g in bars.groupby(["ticker", "d"], sort=False)}
 
     def legs(self, base, i, j):
         """기초 ETF i일 종가 매수 -> j일 종가 매도의 세 가지 수익과 날마다 수익(계좌 계산용)."""
@@ -82,7 +82,7 @@ class Book:
             c = g.c.to_numpy()
             ok = np.ones(len(c) - n, bool) if since is None else (pd.to_datetime(g.d[:len(c) - n]).dt.year >= since).to_numpy()
             p = self.pos[g.ticker.iloc[0]]
-            ok &= (p[:-n] >= 0) & (p[n:] - p[:-n] == n)
+            ok = ok & (p[:-n] >= 0) & (p[n:] - p[:-n] == n)
             if kind == "syn3":
                 r = c[1:] / c[:-1] - 1
                 lg = np.r_[0.0, np.cumsum(np.log1p(3 * r))]
