@@ -1,0 +1,78 @@
+# 규칙서 12~21 (논문·책에서 가져온 스윙 전략) 백테스트. 규칙서마다 따로 동시에 돕니다.
+# 결과는 각 실행의 Summary와 첨부파일(events-<규칙서>)에 남습니다.
+name: events
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  events:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        set: [preearn, epgap, nonews, elder, divmonth, taxloss, spadd, spdel, nr7, bulkowski]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: 백테스트 (지금 S&P 500 + 400, 야후 가격)
+        run: python scripts/run_events.py --set ${{ matrix.set }}
+      - run: cat reports/events_${{ matrix.set }}.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: events-${{ matrix.set }}
+          path: reports/
+
+  # 그때 S&P 500 구성 종목(상장폐지 포함)으로 다시 계산. 가격은 데이트레이딩 b04 실행(38376734678)이
+  # 무료 1분봉에서 만든 하루 표(2018~2026-03). SEC·배당 자료가 필요한 규칙서(12·13·14·16)는 뺍니다.
+  events_pit:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        set: [elder, taxloss, spadd, spdel, nr7, bulkowski, preearn, epgap, nonews]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: b04-prep-20*
+          path: prep_daily
+          run-id: 38376734678
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: rm -f prep_daily/*/bars_*.parquet && du -sh prep_daily
+      - name: 그때 S&P 500 점검
+        run: python scripts/run_events.py --set ${{ matrix.set }} --pit prep_daily
+      - run: cat reports/events_${{ matrix.set }}_pit.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: events-pit-${{ matrix.set }}
+          path: reports/
+
+  # b04 하루 표 첨부파일은 2026-10-20에 지워집니다. 같은 파일을 90일 보관으로 다시 올려 둡니다.
+  keep_daily:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: b04-prep-20*
+          path: prep_daily
+          run-id: 38376734678
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: rm -f prep_daily/*/bars_*.parquet && du -sh prep_daily && find prep_daily -name "daily_*.parquet" | sort
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pit-daily-2017-2026
+          path: prep_daily/
+          retention-days: 90
