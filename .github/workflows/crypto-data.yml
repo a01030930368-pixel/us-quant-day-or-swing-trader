@@ -1,0 +1,29 @@
+# 워뇨띠 장부 분석용 코인 가격 데이터를 받아 crypto-data 브랜치에 올립니다.
+name: crypto-data
+on:
+  push:
+    branches: [claude/project-thread-8mizin]
+    paths: [crypto/scripts/fetch_data.py, .github/workflows/crypto-data.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas pyarrow
+      - run: python crypto/scripts/fetch_data.py out
+      - name: crypto-data 브랜치에 올리기
+        run: |
+          cd out
+          git init -q -b crypto-data
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -qm "coin 1m data + bitmex funding"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" crypto-data
